@@ -46,7 +46,7 @@ class TestAdmin(admin.ModelAdmin):
 
 @admin.register(Registration)
 class RegistrationAdmin(admin.ModelAdmin):
-    list_display = ('user', 'olympiad', 'payment_status', 'registered_at', 'payment_deadline')
+    list_display = ("id",'user', 'olympiad', 'payment_status', 'registered_at', 'payment_deadline')
     list_filter = ('payment_status', 'registered_at')
     search_fields = ('user__username', 'olympiad__title_ru')
 

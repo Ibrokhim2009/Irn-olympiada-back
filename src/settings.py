@@ -29,7 +29,6 @@ ALLOWED_HOSTS = ["*"]
 
 AUTH_USER_MODEL = 'core.User'
 
-# Application definition
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -49,7 +48,7 @@ INSTALLED_APPS = [
 PAYTECH_LICENSE_API_KEY="8KVdgthX#1DA#EvIRW5W6oMHB5GbeD21Of06"
 PAYME_ID = "69b40f0436da3282aa5b48fc"
 PAYME_KEY = "0BcTiqm3SEt2Ra#bF4F1W1oFtO5@u@rMOdc0"
-PAYME_ACCOUNT_FIELD = 'id'
+PAYME_ACCOUNT_FIELD = 'registration_id'
 PAYME_AMOUNT_FIELD = 'price'
 PAYME_ACCOUNT_MODEL = 'core.models.Registration'
 PAYME_ONE_TIME_PAYMENT = True
@@ -65,7 +64,6 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
-# REST Framework Settings
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',

@@ -36,25 +36,21 @@ router.register(r'users', UserViewSet, basename='users_list')
 router.register(r'registrations', RegistrationViewSet, basename='user_registrations')
 
 urlpatterns = [
-    # Auth
     path('auth/register/', RegisterView.as_view(), name='register'),
     path('auth/login/', LoginView.as_view(), name='login_custom'),
     path('auth/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('auth/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('auth/profile/', UserProfileView.as_view(), name='profile'),
 
-    # Olympiads & Exams
     path('', include(router.urls)),
     path('olympiads/<int:pk>/register/', RegisterForOlympiadView.as_view(), name='olympiad-register'),
     path('exams/<int:olympiad_id>/questions/', ExamView.as_view(), name='exam-questions'),
     path('exams/<int:olympiad_id>/submit/', SubmitResultView.as_view(), name='exam-submit'),
 
-    # Payments
     path('payments/payme/', PaymeCallbackView.as_view(), name='payme-callback'),
     path('payments/click/', ClickCallbackView.as_view(), name='click-callback'),
     path('payments/payme/get-link/<int:registration_id>/', GetPaymeLinkView.as_view(), name='get-payme-link'),
 
-    # Swagger Documentation (Classic)
     re_path(r'^docs(?P<format>\.json|\.yaml)$', schema_view.without_ui(cache_timeout=0), name='schema-json'),
     path('docs/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
     path('redoc/', schema_view.with_ui('redoc', cache_timeout=0), name='schema-redoc'),

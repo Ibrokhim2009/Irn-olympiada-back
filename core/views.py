@@ -6,7 +6,8 @@ from django.contrib.auth import authenticate
 from django.utils import timezone
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
-
+from rest_framework import response
+from payme import Payme
 from .serializers import (
     RegisterSerializer, UserSerializer, LoginRequestSerializer,
     OlympiadSerializer, QuestionSerializer, RegistrationSerializer,
@@ -24,6 +25,11 @@ class QuestionViewSet(viewsets.ModelViewSet):
     queryset = Question.objects.all()
     serializer_class = QuestionSerializer
     permission_classes = (IsAdminUserOrReadOnly,)
+
+
+
+
+
 
 class RegisterView(generics.CreateAPIView):
     queryset = User.objects.all()
@@ -124,7 +130,6 @@ class RegistrationViewSet(viewsets.ReadOnlyModelViewSet):
     def get_queryset(self):
         return Registration.objects.filter(user=self.request.user).order_by('-registered_at')
 
-# ==================== ПЛАТЕЖИ (STUBS) ====================
 
 from .utils_payme import get_payme_link
 
@@ -139,22 +144,21 @@ class GetPaymeLinkView(APIView):
         link = get_payme_link(registration.id, registration.price)
         return Response({'link': link})
 
+
 from payme.views import PaymeWebHookAPIView
 
 class PaymeCallbackView(PaymeWebHookAPIView):
     def handle_successfully_payment(self, params, result, *args, **kwargs):
-        """
-        Метод вызывается, когда оплата успешно проведена.
-        """
         from .models import Registration
-        # В payme-pkg account_id это ID нашего объекта (Registration)
         reg_id = params.get('account', {}).get('registration_id') or result.get('account', {}).get('id')
         
-        # Если в params нет, пробуем получить из базы транзакций payme-pkg
         if not reg_id:
             from payme.models import PaymeTransactions
-            trans = PaymeTransactions.objects.get(transaction_id=params.get('id'))
-            reg_id = trans.account_id
+            try:
+                trans = PaymeTransactions.objects.get(transaction_id=params.get('id'))
+                reg_id = trans.account_id
+            except Exception:
+                pass
 
         try:
             registration = Registration.objects.get(id=reg_id)
@@ -167,10 +171,7 @@ class PaymeCallbackView(PaymeWebHookAPIView):
 class ClickCallbackView(APIView):
     permission_classes = (permissions.AllowAny,)
     def post(self, request):
-        # Место для будущей интеграции Click
         return Response({"result": "not_implemented_yet"})
-
-# ==================== ОЛИМПИАДЫ ====================
 
 class OlympiadViewSet(viewsets.ModelViewSet):
     """CRUD олимпиад (чтение для всех, правка для админов)"""
@@ -179,7 +180,6 @@ class OlympiadViewSet(viewsets.ModelViewSet):
     permission_classes = (IsAdminUserOrReadOnly,)
 
     def get_queryset(self):
-        # Обычные юзеры видят только активные, админы — все
         if self.request.user.is_authenticated and self.request.user.role in ['admin', 'superadmin']:
             return Olympiad.objects.all()
         return Olympiad.objects.filter(is_active=True)
@@ -193,18 +193,14 @@ class RegisterForOlympiadView(APIView):
     def post(self, request, pk):
         olympiad = generics.get_object_or_404(Olympiad, pk=pk)
         
-        # Простая проверка мест
         reg_count = olympiad.registrations.filter(payment_status__in=['paid', 'free']).count()
         if reg_count >= olympiad.max_participants:
             return Response({'error': 'Мест больше нет'}, status=status.HTTP_400_BAD_REQUEST)
             
-        # Определяем статус оплаты
         if olympiad.is_free or olympiad.price == 0:
             initial_status = Registration.PaymentStatus.FREE
             deadline = None
         elif olympiad.olympiad_type == 'online':
-            # Для онлайн олимпиад обычно либо бесплатно, либо оплата сразу. 
-            # Если мы тут, значит она платная.
             initial_status = Registration.PaymentStatus.PENDING
             deadline = timezone.now() + timezone.timedelta(minutes=15)
         else:
@@ -223,7 +219,11 @@ class RegisterForOlympiadView(APIView):
         if not created:
             return Response({'error': 'Вы уже зарегистрированы'}, status=status.HTTP_400_BAD_REQUEST)
             
-        return Response(RegistrationSerializer(registration).data, status=status.HTTP_201_CREATED)
+        response_data = RegistrationSerializer(registration).data
+        if initial_status == Registration.PaymentStatus.PENDING:
+            response_data['payment_link'] = get_payme_link(registration.id, registration.price)
+
+        return Response(response_data, status=status.HTTP_201_CREATED)
 
 class ExamView(APIView):
     permission_classes = (permissions.IsAuthenticated,)
@@ -261,3 +261,6 @@ class SubmitResultView(APIView):
             defaults={'score': score, 'answers_json': answers}
         )
         return Response({'success': True, 'score': score})
+
+
+
