@@ -14,6 +14,7 @@ DEBUG = True
 PAYME_AUTHENTICATION = False
 
 ALLOWED_HOSTS = ["irnolympiad.uz", "www.irnolympiad.uz", "89.39.95.209"]
+CSRF_TRUSTED_ORIGINS = ["https://irnolympiad.uz", "https://www.irnolympiad.uz"]
 
 AUTH_USER_MODEL = 'core.User'
 
