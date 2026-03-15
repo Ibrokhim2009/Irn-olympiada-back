@@ -9,7 +9,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = 'django-insecure-b7gr=z&s#*l&*e8p1s1$vds3h=(m08f&cwv7^^wv6o=-2(53ac'
 
-DEBUG = True
+DEBUG = True    
+
+PAYME_AUTHENTICATION = False
 
 ALLOWED_HOSTS = ["irnolympiad.uz", "www.irnolympiad.uz", "89.39.95.209"]
 
