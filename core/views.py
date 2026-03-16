@@ -145,12 +145,10 @@ class PaymeCallbackView(PaymeWebHookAPIView):
         reg_id = account.get('registration_id')
 
         try:
-            registration = Registration.objects.get(id=reg_id)
+            Registration.objects.get(id=reg_id)
         except Registration.DoesNotExist:
             raise AccountDoesNotExist()
-
-        if registration.payment_status in ['paid', 'free']:
-            raise TransactionAlreadyExists()
+        # TransactionAlreadyExists - bu yerda KERAK EMAS
 
     def handle_successfully_payment(self, params, result, *args, **kwargs):
         reg_id = params.get('account', {}).get('registration_id')
@@ -172,6 +170,7 @@ class PaymeCallbackView(PaymeWebHookAPIView):
             print(f"Registration {reg_id} marked as PAID")
         except Registration.DoesNotExist:
             print(f"Registration {reg_id} not found")
+            
 
 class ClickCallbackView(APIView):
     permission_classes = (permissions.AllowAny,)
