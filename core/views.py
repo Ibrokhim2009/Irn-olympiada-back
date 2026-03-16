@@ -12,6 +12,8 @@ from payme import Payme
 from payme.views import PaymeWebHookAPIView
 from payme.exceptions.webhook import AccountDoesNotExist, TransactionAlreadyExists
 from payme.models import PaymeTransactions
+from payme.types import response as payme_response
+from payme.util import time_to_payme
 
 from .serializers import (
     RegisterSerializer, UserSerializer, LoginRequestSerializer,
@@ -142,6 +144,10 @@ class PaymeCallbackView(PaymeWebHookAPIView):
     permission_classes = [AllowAny]
 
     def handle_pre_payment(self, params, result, *args, **kwargs):
+        """
+        CheckPerformTransaction muvaffaqiyatli o'tgandan keyin chaqiriladi.
+        Faqat account mavjudligi va holati tekshiriladi.
+        """
         account = params.get('account', {})
         reg_id = account.get('registration_id')
 
@@ -150,18 +156,7 @@ class PaymeCallbackView(PaymeWebHookAPIView):
         except Registration.DoesNotExist:
             raise AccountDoesNotExist()
 
-        # Agar to'langan yoki bepul bo'lsa
         if registration.payment_status in ['paid', 'free']:
-            raise TransactionAlreadyExists()
-
-        # Agar bu account uchun boshqa aktiv tranzaksiya mavjud bo'lsa
-        current_transaction_id = params.get('id', '')
-        existing = PaymeTransactions.objects.filter(
-            account_id=str(reg_id),
-            state=1
-        ).exclude(transaction_id=current_transaction_id).exists()
-
-        if existing:
             raise TransactionAlreadyExists()
 
     def handle_successfully_payment(self, params, result, *args, **kwargs):
