@@ -147,6 +147,7 @@ class Question(models.Model):
 class Registration(models.Model):
     class PaymentStatus(models.TextChoices):
         PENDING = 'pending', 'Ожидает оплаты'
+        PROCESSING = 'processing', 'Обрабатывается'  # YANGI
         PAID = 'paid', 'Оплачено'
         FREE = 'free', 'Бесплатно'
         EXPIRED = 'expired', 'Бронь истекла'

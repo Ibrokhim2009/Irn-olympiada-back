@@ -150,7 +150,8 @@ class PaymeCallbackView(PaymeWebHookAPIView):
         except Registration.DoesNotExist:
             raise AccountDoesNotExist()
 
-        if registration.payment_status in ['paid', 'free']:
+        # paid, free, processing — bular uchun xato qaytaramiz
+        if registration.payment_status in ['paid', 'free', 'processing']:
             raise TransactionAlreadyExists()
 
     def handle_successfully_payment(self, params, result, *args, **kwargs):
