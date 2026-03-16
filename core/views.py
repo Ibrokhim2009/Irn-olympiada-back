@@ -9,6 +9,9 @@ from drf_yasg import openapi
 from rest_framework import response, filters
 from rest_framework.permissions import AllowAny
 from payme import Payme
+from payme.views import PaymeWebHookAPIView
+from payme.exceptions.webhook import AccountDoesNotExist, TransactionAlreadyExists
+
 from .serializers import (
     RegisterSerializer, UserSerializer, LoginRequestSerializer,
     OlympiadSerializer, QuestionSerializer, RegistrationSerializer,
@@ -18,7 +21,6 @@ from .models import User, Olympiad, Registration, ExamResult, Test, Question
 from .permissions import IsAdminUserOrReadOnly
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.pagination import PageNumberPagination
-from payme.views import PaymeWebHookAPIView
 from .utils_payme import get_payme_link
 
 
@@ -138,14 +140,29 @@ class GetPaymeLinkView(APIView):
 class PaymeCallbackView(PaymeWebHookAPIView):
     permission_classes = [AllowAny]
 
+    def check_perform_transaction(self, params, *args, **kwargs):
+        account = params.get('account', {})
+        reg_id = account.get('registration_id')
+
+        try:
+            registration = Registration.objects.get(id=reg_id)
+        except Registration.DoesNotExist:
+            raise AccountDoesNotExist()  # -31050
+
+        if registration.payment_status in ['paid', 'free']:
+            raise TransactionAlreadyExists()  # -31099
+
+        return {"allow": True}
+
     def handle_successfully_payment(self, params, result, *args, **kwargs):
-        from .models import Registration
-        reg_id = params.get('account', {}).get('registration_id') or result.get('account', {}).get('id')
+        reg_id = params.get('account', {}).get('registration_id')
 
         if not reg_id:
-            from payme.models import PaymeTransactions
             try:
-                trans = PaymeTransactions.objects.get(transaction_id=params.get('id'))
+                from payme.models import PaymeTransactions
+                trans = PaymeTransactions.objects.get(
+                    transaction_id=params.get('id')
+                )
                 reg_id = trans.account_id
             except Exception:
                 pass
