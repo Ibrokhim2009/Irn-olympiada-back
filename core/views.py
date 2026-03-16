@@ -12,8 +12,6 @@ from payme import Payme
 from payme.views import PaymeWebHookAPIView
 from payme.exceptions.webhook import AccountDoesNotExist, TransactionAlreadyExists
 from payme.models import PaymeTransactions
-from payme.types import response as payme_response
-from payme.util import time_to_payme
 
 from .serializers import (
     RegisterSerializer, UserSerializer, LoginRequestSerializer,
