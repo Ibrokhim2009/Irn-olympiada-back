@@ -39,7 +39,7 @@ PAYME_KEY = "0BcTiqm3SEt2Ra#bF4F1W1oFtO5@u@rMOdc0"
 PAYME_ACCOUNT_FIELD = 'registration_id'
 PAYME_AMOUNT_FIELD = 'price'
 PAYME_ACCOUNT_MODEL = 'core.models.Registration'
-PAYME_ONE_TIME_PAYMENT = True
+PAYME_ONE_TIME_PAYMENT = False
 
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
