@@ -11,6 +11,7 @@ from rest_framework.permissions import AllowAny
 from payme import Payme
 from payme.views import PaymeWebHookAPIView
 from payme.exceptions.webhook import AccountDoesNotExist, TransactionAlreadyExists
+from payme.models import PaymeTransactions
 
 from .serializers import (
     RegisterSerializer, UserSerializer, LoginRequestSerializer,
@@ -145,17 +146,29 @@ class PaymeCallbackView(PaymeWebHookAPIView):
         reg_id = account.get('registration_id')
 
         try:
-            Registration.objects.get(id=reg_id)
+            registration = Registration.objects.get(id=reg_id)
         except Registration.DoesNotExist:
             raise AccountDoesNotExist()
-        # TransactionAlreadyExists - bu yerda KERAK EMAS
+
+        # Agar to'langan yoki bepul bo'lsa
+        if registration.payment_status in ['paid', 'free']:
+            raise TransactionAlreadyExists()
+
+        # Agar bu account uchun boshqa aktiv tranzaksiya mavjud bo'lsa
+        current_transaction_id = params.get('id', '')
+        existing = PaymeTransactions.objects.filter(
+            account_id=str(reg_id),
+            state=1
+        ).exclude(transaction_id=current_transaction_id).exists()
+
+        if existing:
+            raise TransactionAlreadyExists()
 
     def handle_successfully_payment(self, params, result, *args, **kwargs):
         reg_id = params.get('account', {}).get('registration_id')
 
         if not reg_id:
             try:
-                from payme.models import PaymeTransactions
                 trans = PaymeTransactions.objects.get(
                     transaction_id=params.get('id')
                 )
@@ -170,7 +183,7 @@ class PaymeCallbackView(PaymeWebHookAPIView):
             print(f"Registration {reg_id} marked as PAID")
         except Registration.DoesNotExist:
             print(f"Registration {reg_id} not found")
-            
+
 
 class ClickCallbackView(APIView):
     permission_classes = (permissions.AllowAny,)
