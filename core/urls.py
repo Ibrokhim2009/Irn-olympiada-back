@@ -11,9 +11,10 @@ from rest_framework_simplejwt.views import (
 from .views import (
     RegisterView, LoginView, UserProfileView,
     OlympiadViewSet, RegisterForOlympiadView, 
-    ExamView, SubmitResultView,
+    ExamView, SubmitResultView, ResultAnalysisView,
     TestViewSet, QuestionViewSet, UserViewSet,
-    RegistrationViewSet, PaymeCallbackView, ClickCallbackView, GetPaymeLinkView
+    RegistrationViewSet, PaymeCallbackView, ClickCallbackView, GetPaymeLinkView,
+    NotificationViewSet, SeedNotificationsView, SendNotificationView, AdminStatsView, RegionViewSet
 )
 
 # Настройка drf-yasg
@@ -34,6 +35,8 @@ router.register(r'tests', TestViewSet)
 router.register(r'questions', QuestionViewSet)
 router.register(r'users', UserViewSet, basename='users_list')
 router.register(r'registrations', RegistrationViewSet, basename='user_registrations')
+router.register(r'notifications', NotificationViewSet, basename='notifications')
+router.register(r'regions', RegionViewSet, basename='regions')
 
 urlpatterns = [
     path('auth/register/', RegisterView.as_view(), name='register'),
@@ -41,11 +44,16 @@ urlpatterns = [
     path('auth/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('auth/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('auth/profile/', UserProfileView.as_view(), name='profile'),
+    
+    path('notifications/seed/', SeedNotificationsView.as_view(), name='notifications-seed'),
+    path('notifications/send/', SendNotificationView.as_view(), name='notifications-send'),
+    path('admin/stats/', AdminStatsView.as_view(), name='admin-stats'),
 
     path('', include(router.urls)),
     path('olympiads/<int:pk>/register/', RegisterForOlympiadView.as_view(), name='olympiad-register'),
     path('exams/<int:olympiad_id>/questions/', ExamView.as_view(), name='exam-questions'),
     path('exams/<int:olympiad_id>/submit/', SubmitResultView.as_view(), name='exam-submit'),
+    path('exams/<int:olympiad_id>/analysis/', ResultAnalysisView.as_view(), name='exam-analysis'),
 
     path('payments/payme/', PaymeCallbackView.as_view(), name='payme-callback'),
     path('payments/click/', ClickCallbackView.as_view(), name='click-callback'),

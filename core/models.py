@@ -30,6 +30,20 @@ class UserManager(BaseUserManager):
         user.save(using=self._db)
         return user
 
+# ==================== РЕГИОНЫ ====================
+class Region(models.Model):
+    name_uz = models.CharField(max_length=255)
+    name_ru = models.CharField(max_length=255)
+    name_en = models.CharField(max_length=255)
+    
+    class Meta:
+        verbose_name = "Регион"
+        verbose_name_plural = "Регионы"
+        ordering = ['name_ru']
+
+    def __str__(self):
+        return self.name_ru
+
 # ==================== ПОЛЬЗОВАТЕЛИ ====================
 class User(AbstractUser):
     class Role(models.TextChoices):
@@ -41,13 +55,16 @@ class User(AbstractUser):
     middle_name = models.CharField(max_length=150, null=True, blank=True)
     phone = models.CharField(max_length=20, unique=True, db_index=True)
     birth_date = models.DateField(null=True, blank=True)
-    region = models.CharField(max_length=100) 
+    region = models.ForeignKey(Region, on_delete=models.SET_NULL, null=True, blank=True, related_name='users') 
     school = models.CharField(max_length=255)
-    grade = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(11)], null=True)
+    grade = models.CharField(max_length=5, null=True, blank=True)
     
     participant_id = models.CharField(max_length=20, unique=True, null=True, blank=True, db_index=True)
 
-    REQUIRED_FIELDS = ['phone', 'role']
+    teacher_name = models.CharField(max_length=255, null=True, blank=True)
+    teacher_phone = models.CharField(max_length=20, null=True, blank=True)
+
+    REQUIRED_FIELDS = ['phone', 'role', 'teacher_name', 'teacher_phone']
     objects = UserManager()
 
     def save(self, *args, **kwargs):
@@ -91,9 +108,17 @@ class Olympiad(models.Model):
     max_participants = models.PositiveIntegerField()
     is_active = models.BooleanField(default=True)
     
+    class Status(models.TextChoices):
+        UPCOMING = 'upcoming', 'Предстоит'
+        ONGOING = 'ongoing', 'Идет'
+        COMPLETED = 'completed', 'Завершена'
+
     # Списки для фильтрации (например, [5, 6, 7] или [1, 2, 3])
     grades = models.JSONField(default=list, blank=True)
     region_ids = models.JSONField(default=list, blank=True)
+    
+    is_started = models.BooleanField(default=False, verbose_name="Запущена вручную")
+    is_completed = models.BooleanField(default=False, verbose_name="Завершена")
     
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -147,7 +172,6 @@ class Question(models.Model):
 class Registration(models.Model):
     class PaymentStatus(models.TextChoices):
         PENDING = 'pending', 'Ожидает оплаты'
-        PROCESSING = 'processing', 'Обрабатывается'  # YANGI
         PAID = 'paid', 'Оплачено'
         FREE = 'free', 'Бесплатно'
         EXPIRED = 'expired', 'Бронь истекла'
@@ -162,6 +186,10 @@ class Registration(models.Model):
     payment_deadline = models.DateTimeField(null=True, blank=True)
     
     transaction_id = models.CharField(max_length=100, null=True, blank=True)
+
+    # Данные учителя на момент регистрации
+    teacher_name = models.CharField(max_length=255, null=True, blank=True)
+    teacher_phone = models.CharField(max_length=20, null=True, blank=True)
 
     class Meta:
         verbose_name = "Регистрация"
@@ -188,3 +216,56 @@ class ExamResult(models.Model):
 
     def __str__(self):
         return f"{self.user.username} - {self.score}%"
+class Notification(models.Model):
+    class Type(models.TextChoices):
+        INFO = 'info', 'Инфо'
+        SUCCESS = 'success', 'Успех'
+        WARNING = 'warning', 'Предупреждение'
+        PAYMENT = 'payment', 'Оплата'
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
+    title_uz = models.CharField(max_length=255, null=True, blank=True)
+    title_ru = models.CharField(max_length=255, null=True, blank=True)
+    title_en = models.CharField(max_length=255, null=True, blank=True)
+    
+    message_uz = models.TextField(null=True, blank=True)
+    message_ru = models.TextField(null=True, blank=True)
+    message_en = models.TextField(null=True, blank=True)
+    
+    type = models.CharField(max_length=10, choices=Type.choices, default=Type.INFO)
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def get_translated(self, field, lang):
+        val = getattr(self, f"{field}_{lang}", None)
+        if val: return val
+        for l in ['uz', 'ru', 'en']:
+            val = getattr(self, f"{field}_{l}", None)
+            if val: return val
+        return ""
+
+    def __str__(self):
+        return f"{self.user.username} - {self.type}"
+
+class UserAchievement(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='achievements')
+    type = models.CharField(max_length=50, help_text="early_bird, top_score, regular, etc.")
+    title_ru = models.CharField(max_length=100)
+    title_uz = models.CharField(max_length=100)
+    title_en = models.CharField(max_length=100)
+    icon = models.CharField(max_length=50, help_text="Lucide icon name")
+    earned_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('user', 'type')
+        verbose_name = "Достижение"
+        verbose_name_plural = "Достижения"
+
+    def get_translated_title(self, lang):
+        return getattr(self, f"title_{lang}", self.title_ru)
+
+    def __str__(self):
+        return f"{self.user.username} - {self.type}"
