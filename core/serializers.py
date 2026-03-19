@@ -7,11 +7,14 @@ class RegistrationSerializer(serializers.ModelSerializer):
     status_label = serializers.SerializerMethodField()
 
 
+    expires_at = serializers.DateTimeField(source='payment_deadline', read_only=True)
+    seconds_left = serializers.ReadOnlyField()
+
     class Meta:
         model = Registration
         fields = ('id', 'olympiad', 'olympiad_title', 'olympiad_type', 'price', 
                   'registered_at', 'payment_status', 'status_label', 'transaction_id',
-                  'teacher_name', 'teacher_phone')
+                  'teacher_name', 'teacher_phone', 'expires_at', 'seconds_left')
 
     def get_status_label(self, obj):
         return obj.get_payment_status_display()
@@ -78,8 +81,8 @@ class UserSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = User
-        fields = ('id', 'username', 'first_name', 'last_name', 'middle_name', 
-                  'phone', 'region', 'school', 'grade', 'role', 'participant_id', 
+        fields = ('id', 'username', 'email', 'first_name', 'last_name', 'middle_name', 
+                  'phone', 'birth_date', 'region', 'school', 'grade', 'role', 'participant_id', 
                   'teacher_name', 'teacher_phone',
                   'registrations', 'exam_results', 'notifications', 'achievements')
 
