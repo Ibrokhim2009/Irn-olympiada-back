@@ -26,6 +26,8 @@ SECRET_KEY = 'django-insecure-b7gr=z&s#*l&*e8p1s1$vds3h=(m08f&cwv7^^wv6o=-2(53ac
 DEBUG = True
 
 ALLOWED_HOSTS = ['irnolympiad.uz', 'www.irnolympiad.uz', '127.0.0.1', 'localhost', 'x8k2m9f3.irnolympiad.uz']
+CSRF_TRUSTED_ORIGINS = ['https://x8k2m9f3.irnolympiad.uz', 'https://irnolympiad.uz']
+
 
 AUTH_USER_MODEL = 'core.User'
 
