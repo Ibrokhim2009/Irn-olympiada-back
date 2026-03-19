@@ -25,7 +25,8 @@ SECRET_KEY = 'django-insecure-b7gr=z&s#*l&*e8p1s1$vds3h=(m08f&cwv7^^wv6o=-2(53ac
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['irnolympiad.uz', 'www.irnolympiad.uz', '127.0.0.1', 'localhost']
+ALLOWED_HOSTS = ['irnolympiad.uz', 'www.irnolympiad.uz', '127.0.0.1', 'localhost', 'x8k2m9f3.irnolympiad.uz']
+CSRF_TRUSTED_ORIGINS = ['https://x8k2m9f3.irnolympiad.uz', 'https://irnolympiad.uz']
 
 AUTH_USER_MODEL = 'core.User'
 
@@ -99,6 +100,7 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:5173",
     "https://irnolympiad.uz",
     "https://www.irnolympiad.uz",
+    "https://x8k2m9f3.irnolympiad.uz",
 ]
 
 CSRF_TRUSTED_ORIGINS = [
@@ -106,6 +108,7 @@ CSRF_TRUSTED_ORIGINS = [
     "http://127.0.0.1:5173",
     "https://irnolympiad.uz",
     "https://www.irnolympiad.uz",
+    "https://x8k2m9f3.irnolympiad.uz",
 ]
 
 ROOT_URLCONF = 'src.urls'
@@ -174,3 +177,4 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+CSRF_TRUSTED_ORIGINS = ['https://x8k2m9f3.irnolympiad.uz', 'https://irnolympiad.uz', 'https://www.irnolympiad.uz']
