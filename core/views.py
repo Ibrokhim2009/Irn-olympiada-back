@@ -135,6 +135,16 @@ class RegistrationViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = (permissions.IsAuthenticated,)
 
     def get_queryset(self):
+        from .models import Registration
+        from django.utils import timezone
+        
+        # Автоматически помечаем просроченные регистрации как EXPIRED
+        Registration.objects.filter(
+            user=self.request.user,
+            payment_status=Registration.PaymentStatus.PENDING,
+            payment_deadline__lt=timezone.now()
+        ).update(payment_status=Registration.PaymentStatus.EXPIRED)
+        
         return Registration.objects.filter(user=self.request.user).order_by('-registered_at')
 
 
@@ -248,11 +258,17 @@ class RegisterForOlympiadView(APIView):
             defaults={
                 'payment_status': initial_status,
                 'price': olympiad.price,
-                'payment_deadline': deadline,
                 'teacher_name': request.user.teacher_name,
                 'teacher_phone': request.user.teacher_phone,
             }
         )
+        # Если регистрация уже была, но она EXPIRED, мы позволяем перевыпустить её
+        if not created and registration.payment_status == Registration.PaymentStatus.EXPIRED:
+             registration.payment_status = initial_status
+             registration.payment_deadline = None # Будет пересчитано в save()
+             registration.save()
+             created = True
+             
         if not created:
             return Response({'error': 'Вы уже зарегистрированы'}, status=status.HTTP_400_BAD_REQUEST)
 

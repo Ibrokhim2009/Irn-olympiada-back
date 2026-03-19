@@ -199,6 +199,31 @@ class Registration(models.Model):
             models.Index(fields=['payment_status', 'payment_deadline']),
         ]
 
+    def save(self, *args, **kwargs):
+        from django.utils import timezone
+        from datetime import timedelta
+        if not self.payment_deadline:
+            # Если объект еще не сохранен, registered_at может быть None (auto_now_add)
+            # В таком случае используем текущее время
+            base_time = self.registered_at or timezone.now()
+            self.payment_deadline = base_time + timedelta(minutes=15)
+        super().save(*args, **kwargs)
+
+    @property
+    def is_expired(self):
+        from django.utils import timezone
+        if self.payment_status not in [self.PaymentStatus.PENDING]:
+            return False
+        return timezone.now() > self.payment_deadline
+
+    @property
+    def seconds_left(self):
+        from django.utils import timezone
+        if self.payment_status not in [self.PaymentStatus.PENDING]:
+            return 0
+        diff = self.payment_deadline - timezone.now()
+        return max(0, int(diff.total_seconds()))
+
     def __str__(self):
         return f"{self.user.username} - {self.olympiad.title_ru}"
 
