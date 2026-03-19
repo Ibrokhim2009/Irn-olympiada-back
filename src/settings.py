@@ -101,6 +101,7 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:5173",
     "https://irnolympiad.uz",
     "https://www.irnolympiad.uz",
+    "https://x8k2m9f3.irnolympiad.uz"
 ]
 
 CSRF_TRUSTED_ORIGINS = [
@@ -108,6 +109,7 @@ CSRF_TRUSTED_ORIGINS = [
     "http://127.0.0.1:5173",
     "https://irnolympiad.uz",
     "https://www.irnolympiad.uz",
+    "https://x8k2m9f3.irnolympiad.uz"
 ]
 
 ROOT_URLCONF = 'src.urls'
