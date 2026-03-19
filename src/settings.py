@@ -25,7 +25,7 @@ SECRET_KEY = 'django-insecure-b7gr=z&s#*l&*e8p1s1$vds3h=(m08f&cwv7^^wv6o=-2(53ac
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ["*"]
+ALLOWED_HOSTS = ['irnolympiad.uz', 'www.irnolympiad.uz', '127.0.0.1', 'localhost']
 
 AUTH_USER_MODEL = 'core.User'
 
@@ -93,6 +93,20 @@ SIMPLE_JWT = {
 }
 
 CORS_ALLOW_ALL_ORIGINS = True # Для разработки
+
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "https://irnolympiad.uz",
+    "https://www.irnolympiad.uz",
+]
+
+CSRF_TRUSTED_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "https://irnolympiad.uz",
+    "https://www.irnolympiad.uz",
+]
 
 ROOT_URLCONF = 'src.urls'
 
