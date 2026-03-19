@@ -1,7 +1,7 @@
 from django.conf import settings
 from payme import Payme
 
-def get_payme_link(registration_id: int, amount: int, return_url: str = "https://irnolympiads.uz/dashboard/history"):
+def get_payme_link(registration_id: int, amount: int, return_url: str = "https://irnolympiad.uz/dashboard/history"):
     """
     Генерирует ссылку на оплату через библиотеку payme-pkg
     """
