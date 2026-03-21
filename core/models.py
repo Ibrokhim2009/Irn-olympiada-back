@@ -1,6 +1,7 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.core.validators import MinValueValidator, MaxValueValidator
+from django.utils import timezone
 import uuid
 
 class UserManager(BaseUserManager):
@@ -179,7 +180,7 @@ class Registration(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='registrations')
     olympiad = models.ForeignKey(Olympiad, on_delete=models.CASCADE, related_name='registrations')
     
-    registered_at = models.DateTimeField(auto_now_add=True)
+    registered_at = models.DateTimeField(default=timezone.now)
     payment_status = models.CharField(max_length=10, choices=PaymentStatus.choices, default=PaymentStatus.PENDING, db_index=True)
     price = models.BigIntegerField(default=0)
     
@@ -202,9 +203,8 @@ class Registration(models.Model):
     def save(self, *args, **kwargs):
         from django.utils import timezone
         from datetime import timedelta
-        if not self.payment_deadline:
-            # Если объект еще не сохранен, registered_at может быть None (auto_now_add)
-            # В таком случае используем текущее время
+        if not self.payment_deadline and self.payment_status == self.PaymentStatus.PENDING:
+            # Используем registered_at как базовое время (или текущее)
             base_time = self.registered_at or timezone.now()
             self.payment_deadline = base_time + timedelta(minutes=15)
         super().save(*args, **kwargs)

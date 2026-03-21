@@ -138,7 +138,7 @@ class RegistrationViewSet(viewsets.ReadOnlyModelViewSet):
         from .models import Registration
         from django.utils import timezone
         
-        # Автоматически помечаем просроченные регистрации как EXPIRED
+        # Автоматически помечаем просроченные регистрации ТЕКУЩЕГО пользователя как EXPIRED
         Registration.objects.filter(
             user=self.request.user,
             payment_status=Registration.PaymentStatus.PENDING,
@@ -241,16 +241,27 @@ class RegisterForOlympiadView(APIView):
     def post(self, request, pk):
         olympiad = generics.get_object_or_404(Olympiad, pk=pk)
         
-        reg_count = olympiad.registrations.filter(payment_status__in=['paid', 'free']).count()
+        # Прежде чем считать места, сбросим просроченные брони У ВСЕХ участников этой олимпиады
+        Registration.objects.filter(
+            olympiad=olympiad,
+            payment_status=Registration.PaymentStatus.PENDING,
+            payment_deadline__lt=timezone.now()
+        ).update(payment_status=Registration.PaymentStatus.EXPIRED)
+
+        # Считаем PAID + FREE + АКТИВНЫЕ PENDING
+        reg_count = olympiad.registrations.filter(
+            payment_status__in=['paid', 'free', 'pending']
+        ).count()
+
         if reg_count >= olympiad.max_participants:
-            return Response({'error': 'Мест больше нет'}, status=status.HTTP_400_BAD_REQUEST)
+            # Но если у текущего пользователя уже есть место (даже PENDING), мы его не блокируем
+            if not Registration.objects.filter(user=request.user, olympiad=olympiad, payment_status__in=['paid', 'free', 'pending']).exists():
+                return Response({'error': 'Мест больше нет'}, status=status.HTTP_400_BAD_REQUEST)
             
         if olympiad.is_free or olympiad.price == 0:
             initial_status = Registration.PaymentStatus.FREE
-            deadline = None
         else:
             initial_status = Registration.PaymentStatus.PENDING
-            deadline = timezone.now() + timezone.timedelta(minutes=15)
 
         registration, created = Registration.objects.get_or_create(
             user=request.user,
@@ -265,6 +276,7 @@ class RegisterForOlympiadView(APIView):
         # Если регистрация уже была, но она EXPIRED, мы позволяем перевыпустить её
         if not created and registration.payment_status == Registration.PaymentStatus.EXPIRED:
              registration.payment_status = initial_status
+             registration.registered_at = timezone.now() # Обновляем время регистрации
              registration.payment_deadline = None # Будет пересчитано в save()
              registration.save()
              created = True
@@ -277,7 +289,7 @@ class RegisterForOlympiadView(APIView):
         from datetime import timedelta
         
         # 1. Early Bird (7 days before)
-        if olympiad.start_datetime - timezone.now() > timedelta(days=7):
+        if olympiad.start_datetime and (olympiad.start_datetime - timezone.now() > timedelta(days=7)):
             UserAchievement.objects.get_or_create(
                 user=request.user, type='early_bird',
                 defaults={

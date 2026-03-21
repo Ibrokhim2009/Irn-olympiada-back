@@ -120,7 +120,8 @@ class OlympiadSerializer(serializers.ModelSerializer):
                   'title_ru', 'title_uz', 'title_en', 'description_ru', 'description_uz', 'description_en')
 
     def get_registered_count(self, obj):
-        return obj.registrations.all().count()
+        # Считаем всех, кроме тех, у кого бронь явно истекла
+        return obj.registrations.exclude(payment_status='expired').count()
 
     def to_representation(self, instance):
         request = self.context.get('request')
@@ -133,7 +134,8 @@ class OlympiadSerializer(serializers.ModelSerializer):
 
     def get_seats_remaining(self, obj):
         try:
-            reg_count = obj.registrations.filter(payment_status__in=['paid', 'free']).count()
+            # Учитываем всех активных (paid, free, pending)
+            reg_count = obj.registrations.exclude(payment_status='expired').count()
             return max(0, obj.max_participants - reg_count)
         except: return 0
 
@@ -141,7 +143,8 @@ class OlympiadSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         try:
             if request and request.user.is_authenticated:
-                return obj.registrations.filter(user=request.user).exists()
+                # Считаем, что пользователь НЕ зарегистрирован, если его бронь истекла
+                return obj.registrations.filter(user=request.user).exclude(payment_status='expired').exists()
         except: pass
         return False
 
