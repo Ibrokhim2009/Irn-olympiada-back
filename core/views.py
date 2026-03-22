@@ -241,34 +241,22 @@ class RegisterForOlympiadView(APIView):
     def post(self, request, pk):
         olympiad = generics.get_object_or_404(Olympiad, pk=pk)
         
-        now = timezone.now()
-        # 1. Если олимпиада началась или завершена - закрыто
-        if now >= olympiad.start_datetime or olympiad.is_completed or not olympiad.is_active:
-             return Response({'error': 'Регистрация на эту олимпиаду закрыта'}, status=status.HTTP_400_BAD_REQUEST)
-
-        # 2. Если есть крайний срок регистрации и он прошел - закрыто
-        if olympiad.registration_end_datetime and now >= olympiad.registration_end_datetime:
-             return Response({'error': 'Срок регистрации на эту олимпиаду истек'}, status=status.HTTP_400_BAD_REQUEST)
-
         # Прежде чем считать места, сбросим просроченные брони У ВСЕХ участников этой олимпиады
         Registration.objects.filter(
             olympiad=olympiad,
             payment_status=Registration.PaymentStatus.PENDING,
-            payment_deadline__lt=now
+            payment_deadline__lt=timezone.now()
         ).update(payment_status=Registration.PaymentStatus.EXPIRED)
 
-        # 3. Проверка мест (ТОЛЬКО если НЕ указан registration_end_datetime)
-        # Если срок указан, то мест "бесконечно", как просил юзер
-        if not olympiad.registration_end_datetime:
-            # Считаем PAID + FREE + АКТИВНЫЕ PENDING
-            reg_count = olympiad.registrations.filter(
-                payment_status__in=['paid', 'free', 'pending']
-            ).count()
+        # Считаем PAID + FREE + АКТИВНЫЕ PENDING
+        reg_count = olympiad.registrations.filter(
+            payment_status__in=['paid', 'free', 'pending']
+        ).count()
 
-            if reg_count >= olympiad.max_participants:
-                # Но если у текущего пользователя уже есть место (даже PENDING), мы его не блокируем
-                if not Registration.objects.filter(user=request.user, olympiad=olympiad, payment_status__in=['paid', 'free', 'pending']).exists():
-                    return Response({'error': 'Свободных мест больше нет'}, status=status.HTTP_400_BAD_REQUEST)
+        if reg_count >= olympiad.max_participants:
+            # Но если у текущего пользователя уже есть место (даже PENDING), мы его не блокируем
+            if not Registration.objects.filter(user=request.user, olympiad=olympiad, payment_status__in=['paid', 'free', 'pending']).exists():
+                return Response({'error': 'Мест больше нет'}, status=status.HTTP_400_BAD_REQUEST)
             
         if olympiad.is_free or olympiad.price == 0:
             initial_status = Registration.PaymentStatus.FREE

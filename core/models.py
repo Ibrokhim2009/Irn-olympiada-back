@@ -107,7 +107,6 @@ class Olympiad(models.Model):
     duration_minutes = models.PositiveIntegerField(default=60)
     
     max_participants = models.PositiveIntegerField()
-    registration_end_datetime = models.DateTimeField(null=True, blank=True, help_text="Дата окончания регистрации. Если не указана, регистрация идет до начала олимпиады или до заполнения мест.")
     is_active = models.BooleanField(default=True)
     
     class Status(models.TextChoices):
