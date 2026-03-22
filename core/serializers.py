@@ -110,14 +110,42 @@ class OlympiadSerializer(serializers.ModelSerializer):
     is_registered = serializers.SerializerMethodField()
     registered_count = serializers.SerializerMethodField()
 
+    is_registration_open = serializers.SerializerMethodField()
     test = TestSerializer(read_only=True)
     class Meta:
         model = Olympiad
         fields = ('id', 'title', 'description', 'olympiad_type', 'price', 'is_free',
-                  'start_datetime', 'duration_minutes', 'max_participants', 
-                  'is_active', 'is_started', 'is_completed', 'seats_remaining', 'is_registered', 'registered_count',
+                  'start_datetime', 'duration_minutes', 'max_participants', 'registration_end_datetime',
+                  'is_active', 'is_started', 'is_completed', 'is_registration_open', 'seats_remaining', 'is_registered', 'registered_count',
                   'grades', 'region_ids', 'test',
                   'title_ru', 'title_uz', 'title_en', 'description_ru', 'description_uz', 'description_en')
+
+    def get_is_registration_open(self, obj):
+        from django.utils import timezone
+        now = timezone.now()
+        
+        # Если уже началась или завершена - закрыто
+        if now >= obj.start_datetime or obj.is_completed or not obj.is_active:
+            return False
+            
+        # Если есть крайний срок и он прошел - закрыто
+        if obj.registration_end_datetime and now >= obj.registration_end_datetime:
+            return False
+            
+        # Если мест больше нет (и не указан крайний срок, или он не прошел)
+        # Мы учитываем max_participants только если registration_end_datetime не указана 
+        # ИЛИ если юзер хочет все равно проверять лимит.
+        # Юзер сказал: "если не указан срок, то до заполнения..."
+        # Значит если срок указан, то лимит может быть проигнорирован? 
+        # Или всё-таки учитываем? "beskonechno" (бесконечно) - возможно имелось в виду что не закроется раньше срока.
+        # Обычно лимит участников важен. Оставим проверку лимита если срок НЕ указан.
+        
+        if not obj.registration_end_datetime:
+            reg_count = obj.registrations.exclude(payment_status='expired').count()
+            if reg_count >= obj.max_participants:
+                return False
+                
+        return True
 
     def get_registered_count(self, obj):
         # Считаем всех, кроме тех, у кого бронь явно истекла
