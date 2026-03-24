@@ -241,6 +241,14 @@ class RegisterForOlympiadView(APIView):
     def post(self, request, pk):
         olympiad = generics.get_object_or_404(Olympiad, pk=pk)
         
+        # 0. Проверка дат
+        now = timezone.now()
+        if now >= olympiad.start_datetime:
+            return Response({"error": "Регистрация закрыта: олимпиада уже началась"}, status=400)
+            
+        if olympiad.registration_end_date and now >= olympiad.registration_end_date:
+            return Response({"error": "Регистрация закрыта: время вышло"}, status=400)
+        
         # Прежде чем считать места, сбросим просроченные брони У ВСЕХ участников этой олимпиады
         Registration.objects.filter(
             olympiad=olympiad,
@@ -253,7 +261,7 @@ class RegisterForOlympiadView(APIView):
             payment_status__in=['paid', 'free', 'pending']
         ).count()
 
-        if reg_count >= olympiad.max_participants:
+        if olympiad.max_participants > 0 and reg_count >= olympiad.max_participants:
             # Но если у текущего пользователя уже есть место (даже PENDING), мы его не блокируем
             if not Registration.objects.filter(user=request.user, olympiad=olympiad, payment_status__in=['paid', 'free', 'pending']).exists():
                 return Response({'error': 'Мест больше нет'}, status=status.HTTP_400_BAD_REQUEST)

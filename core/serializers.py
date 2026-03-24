@@ -114,7 +114,7 @@ class OlympiadSerializer(serializers.ModelSerializer):
     class Meta:
         model = Olympiad
         fields = ('id', 'title', 'description', 'olympiad_type', 'price', 'is_free',
-                  'start_datetime', 'duration_minutes', 'max_participants', 
+                  'start_datetime', 'duration_minutes', 'max_participants', 'registration_end_date',
                   'is_active', 'is_started', 'is_completed', 'seats_remaining', 'is_registered', 'registered_count',
                   'grades', 'region_ids', 'test',
                   'title_ru', 'title_uz', 'title_en', 'description_ru', 'description_uz', 'description_en')
@@ -134,6 +134,8 @@ class OlympiadSerializer(serializers.ModelSerializer):
 
     def get_seats_remaining(self, obj):
         try:
+            if not obj.max_participants:
+                return 9999 # Значение для "без лимита"
             # Учитываем всех активных (paid, free, pending)
             reg_count = obj.registrations.exclude(payment_status='expired').count()
             return max(0, obj.max_participants - reg_count)
