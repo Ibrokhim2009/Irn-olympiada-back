@@ -145,11 +145,17 @@ class GetPaymeLinkView(APIView):
         if registration.payment_status in ['paid', 'free']:
             return Response({'error': 'Already paid'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # ✅ Validate price before generating link
-        if not registration.price or registration.price <= 0:
+        # ✅ Always use olympiad.price as source of truth
+        amount = registration.olympiad.price
+        if not amount or amount <= 0:
             return Response({'error': 'Invalid payment amount'}, status=status.HTTP_400_BAD_REQUEST)
 
-        link = get_payme_link(registration.id, registration.price)
+        # ✅ Sync registration.price if it drifted
+        if registration.price != amount:
+            registration.price = amount
+            registration.save(update_fields=['price'])
+
+        link = get_payme_link(registration.id, amount)
         return Response({'link': link})
 
 
