@@ -171,6 +171,17 @@ class Question(models.Model):
     def __str__(self):
         return f"Q in {self.test.olympiad.title_ru}"
 
+class RegistrationManager(models.Manager):
+    def get(self, *args, **kwargs):
+        if 'registration_id' in kwargs:
+            kwargs['id'] = kwargs.pop('registration_id')
+        return super().get(*args, **kwargs)
+
+    def filter(self, *args, **kwargs):
+        if 'registration_id' in kwargs:
+            kwargs['id'] = kwargs.pop('registration_id')
+        return super().filter(*args, **kwargs)
+
 class Registration(models.Model):
     class PaymentStatus(models.TextChoices):
         PENDING = 'pending', 'Ожидает оплаты'
@@ -180,6 +191,8 @@ class Registration(models.Model):
 
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='registrations')
     olympiad = models.ForeignKey(Olympiad, on_delete=models.CASCADE, related_name='registrations')
+    
+    objects = RegistrationManager()
     
     registered_at = models.DateTimeField(default=timezone.now)
     payment_status = models.CharField(max_length=10, choices=PaymentStatus.choices, default=PaymentStatus.PENDING, db_index=True)

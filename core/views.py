@@ -169,7 +169,7 @@ class PaymeCallbackView(PaymeWebHookAPIView):
     
     def handle_successfully_payment(self, params, result, *args, **kwargs):
         from .models import Registration
-        reg_id = params.get('account', {}).get('id') or result.get('account', {}).get('id')
+        reg_id = params.get('account', {}).get('registration_id') or result.get('account', {}).get('id')
         
         if not reg_id:
             from payme.models import PaymeTransactions
