@@ -9,6 +9,6 @@ def get_payme_link(registration_id: int, amount: int, return_url: str = "https:/
     # payme-pkg ожидает сумму в тийинах (сум * 100)
     return payme.generate_pay_link(
         id=registration_id,
-        amount=int(amount),
+        amount=int(amount * 100),
         return_url=return_url
     )

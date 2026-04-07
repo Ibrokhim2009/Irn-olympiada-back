@@ -100,7 +100,7 @@ class Olympiad(models.Model):
     description_en = models.TextField(null=True, blank=True)
     
     olympiad_type = models.CharField(max_length=10, choices=Type.choices, default=Type.ONLINE, db_index=True)
-    price = models.BigIntegerField(default=0, help_text="Цена в тийнах (сум * 100)")
+    price = models.BigIntegerField(default=0, help_text="Цена в UZS (целое число)")
     is_free = models.BooleanField(default=False, verbose_name="Бесплатно")
     
     start_datetime = models.DateTimeField(db_index=True)
@@ -171,17 +171,6 @@ class Question(models.Model):
     def __str__(self):
         return f"Q in {self.test.olympiad.title_ru}"
 
-class RegistrationManager(models.Manager):
-    def get(self, *args, **kwargs):
-        if 'registration_id' in kwargs:
-            kwargs['id'] = kwargs.pop('registration_id')
-        return super().get(*args, **kwargs)
-
-    def filter(self, *args, **kwargs):
-        if 'registration_id' in kwargs:
-            kwargs['id'] = kwargs.pop('registration_id')
-        return super().filter(*args, **kwargs)
-
 class Registration(models.Model):
     class PaymentStatus(models.TextChoices):
         PENDING = 'pending', 'Ожидает оплаты'
@@ -191,8 +180,6 @@ class Registration(models.Model):
 
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='registrations')
     olympiad = models.ForeignKey(Olympiad, on_delete=models.CASCADE, related_name='registrations')
-    
-    objects = RegistrationManager()
     
     registered_at = models.DateTimeField(default=timezone.now)
     payment_status = models.CharField(max_length=10, choices=PaymentStatus.choices, default=PaymentStatus.PENDING, db_index=True)
