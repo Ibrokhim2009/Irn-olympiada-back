@@ -3,7 +3,7 @@ from .models import User, Olympiad, Question, Test, Registration, ExamResult, No
 class RegistrationSerializer(serializers.ModelSerializer):
     olympiad_title = serializers.ReadOnlyField(source='olympiad.title_ru')
     olympiad_type = serializers.ReadOnlyField(source='olympiad.olympiad_type')
-    price = serializers.ReadOnlyField(source='olympiad.price')
+    price = serializers.SerializerMethodField()
     status_label = serializers.SerializerMethodField()
 
 
@@ -18,6 +18,9 @@ class RegistrationSerializer(serializers.ModelSerializer):
 
     def get_status_label(self, obj):
         return obj.get_payment_status_display()
+    
+    def get_price(self, obj):
+        return obj.price / 100 if obj.price else 0
 
 class RegionSerializer(serializers.ModelSerializer):
     class Meta:
@@ -111,6 +114,7 @@ class OlympiadSerializer(serializers.ModelSerializer):
     registered_count = serializers.SerializerMethodField()
 
     test = TestSerializer(read_only=True)
+    price = serializers.SerializerMethodField()
     class Meta:
         model = Olympiad
         fields = ('id', 'title', 'description', 'olympiad_type', 'price', 'is_free',
@@ -145,8 +149,10 @@ class OlympiadSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         try:
             if request and request.user.is_authenticated:
-                # Считаем, что пользователь НЕ зарегистрирован, если его бронь истекла
                 return obj.registrations.filter(user=request.user).exclude(payment_status='expired').exists()
         except: pass
         return False
+    
+    def get_price(self, obj):
+        return obj.price / 100 if obj.price else 0
 

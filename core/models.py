@@ -100,7 +100,7 @@ class Olympiad(models.Model):
     description_en = models.TextField(null=True, blank=True)
     
     olympiad_type = models.CharField(max_length=10, choices=Type.choices, default=Type.ONLINE, db_index=True)
-    price = models.BigIntegerField(default=0, help_text="Цена в UZS (целое число)")
+    price = models.BigIntegerField(default=0, help_text="Цена в тийнах (сум * 100)")
     is_free = models.BooleanField(default=False, verbose_name="Бесплатно")
     
     start_datetime = models.DateTimeField(db_index=True)
