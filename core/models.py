@@ -54,7 +54,7 @@ class User(AbstractUser):
 
     role = models.CharField(max_length=20, choices=Role.choices, default=Role.PARTICIPANT)
     middle_name = models.CharField(max_length=150, null=True, blank=True)
-    phone = models.CharField(max_length=20, unique=True, db_index=True)
+    phone = models.CharField(max_length=20, db_index=True)
     birth_date = models.DateField(null=True, blank=True)
     region = models.ForeignKey(Region, on_delete=models.SET_NULL, null=True, blank=True, related_name='users') 
     school = models.CharField(max_length=255)
@@ -81,6 +81,12 @@ class User(AbstractUser):
                 if not User.objects.filter(participant_id=new_id).exists():
                     self.participant_id = new_id
                     break
+        
+        # Всегда синхронизируем username с participant_id для уникальности
+        # Это позволяет заходить по ID и иметь несколько аккаунтов на один телефон
+        if self.participant_id:
+            self.username = self.participant_id
+
         super().save(*args, **kwargs)
 
     def __str__(self):

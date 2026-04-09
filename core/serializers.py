@@ -89,6 +89,8 @@ class UserSerializer(serializers.ModelSerializer):
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)
     participant_id = serializers.CharField(read_only=True)
+    username = serializers.CharField(required=False, allow_blank=True)
+
     class Meta:
         model = User
         fields = ('username', 'password', 'first_name', 'last_name', 'middle_name', 
@@ -96,6 +98,11 @@ class RegisterSerializer(serializers.ModelSerializer):
                   'teacher_name', 'teacher_phone')
     
     def create(self, validated_data):
+        # Если юзернейм не пришел, используем телефон (модель потом заменит его на participant_id)
+        if not validated_data.get('username'):
+            import uuid
+            # Добавляем хвост, чтобы не было конфликта по уникальности ДО вызова save()
+            validated_data['username'] = f"{validated_data.get('phone')}_{uuid.uuid4().hex[:8]}"
         return User.objects.create_user(**validated_data, role=User.Role.PARTICIPANT)
 
 class LoginRequestSerializer(serializers.Serializer):

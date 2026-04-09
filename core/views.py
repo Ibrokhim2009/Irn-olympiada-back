@@ -63,26 +63,47 @@ class LoginView(APIView):
         serializer = LoginRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        username_input = serializer.validated_data.get('username')
+        login_input = serializer.validated_data.get('username')
         password = serializer.validated_data.get('password')
 
-        user = authenticate(username=username_input, password=password)
+        # 1. Сначала пробуем аутентифицировать как обычно (по username/participant_id)
+        user = authenticate(username=login_input, password=password)
 
         if not user:
-            try:
-                found_user = User.objects.get(email=username_input)
-                if found_user.check_password(password):
-                    user = found_user
-            except User.DoesNotExist:
-                pass
-
-        if not user:
-            try:
-                found_user = User.objects.get(participant_id=username_input)
-                if found_user.check_password(password):
-                    user = found_user
-            except User.DoesNotExist:
-                pass
+            # 2. Если не вышло, проверяем, не телефон ли это
+            users_with_phone = User.objects.filter(phone=login_input)
+            
+            valid_users = []
+            for u in users_with_phone:
+                if u.check_password(password):
+                    valid_users.append(u)
+            
+            if len(valid_users) > 1:
+                # Найдено несколько аккаунтов на этот номер
+                accounts_data = [
+                    {
+                        'participant_id': u.participant_id,
+                        'full_name': f"{u.last_name} {u.first_name} {u.middle_name or ''}".strip(),
+                        'grade': u.grade
+                    } for u in valid_users
+                ]
+                return Response({
+                    'multiple_accounts': True,
+                    'accounts': accounts_data,
+                    'message': 'Найдено несколько аккаунтов. Пожалуйста, выберите нужный.'
+                }, status=status.HTTP_200_OK)
+            
+            elif len(valid_users) == 1:
+                user = valid_users[0]
+            
+            # 3. Пробуем по email (на всякий случай, как было раньше)
+            if not user:
+                try:
+                    found_user = User.objects.get(email=login_input)
+                    if found_user.check_password(password):
+                        user = found_user
+                except User.DoesNotExist:
+                    pass
 
         if user:
             refresh = RefreshToken.for_user(user)
@@ -91,6 +112,7 @@ class LoginView(APIView):
                 'refresh': str(refresh),
                 'access': str(refresh.access_token),
             })
+        
         return Response({'error': 'Неверный логин или пароль'}, status=status.HTTP_401_UNAUTHORIZED)
 
 
