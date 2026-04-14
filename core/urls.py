@@ -9,15 +9,14 @@ from rest_framework_simplejwt.views import (
     TokenRefreshView,
 )
 from .views import (
-    RegisterView, LoginView, UserProfileView,
-    OlympiadViewSet, RegisterForOlympiadView, 
+    OlympiadViewSet, SubOlympiadViewSet, RegisterForOlympiadView, 
     ExamView, SubmitResultView, ResultAnalysisView,
+    RegisterView,LoginView,UserProfileView,
     TestViewSet, QuestionViewSet, UserViewSet,
     RegistrationViewSet, PaymeCallbackView, ClickCallbackView, GetPaymeLinkView,
     NotificationViewSet, SeedNotificationsView, SendNotificationView, AdminStatsView, RegionViewSet
 )
 
-# Настройка drf-yasg
 schema_view = get_schema_view(
    openapi.Info(
       title="IRN Olympiad API",
@@ -31,6 +30,7 @@ schema_view = get_schema_view(
 
 router = DefaultRouter()
 router.register(r'olympiads', OlympiadViewSet)
+router.register(r'subs', SubOlympiadViewSet)
 router.register(r'tests', TestViewSet)
 router.register(r'questions', QuestionViewSet)
 router.register(r'users', UserViewSet, basename='users_list')
@@ -51,8 +51,8 @@ urlpatterns = [
 
     path('', include(router.urls)),
     path('olympiads/<int:pk>/register/', RegisterForOlympiadView.as_view(), name='olympiad-register'),
-    path('exams/<int:olympiad_id>/questions/', ExamView.as_view(), name='exam-questions'),
-    path('exams/<int:olympiad_id>/submit/', SubmitResultView.as_view(), name='exam-submit'),
+    path('exams/<int:sub_olympiad_id>/questions/', ExamView.as_view(), name='exam-questions'),
+    path('exams/<int:sub_olympiad_id>/submit/', SubmitResultView.as_view(), name='exam-submit'),
     path('exams/<int:olympiad_id>/analysis/', ResultAnalysisView.as_view(), name='exam-analysis'),
 
     path('payments/payme/', PaymeCallbackView.as_view(), name='payme-callback'),

@@ -1,5 +1,8 @@
 from rest_framework import serializers
-from .models import User, Olympiad, Question, Test, Registration, ExamResult, Notification, Region, UserAchievement
+from .models import User, Olympiad, SubOlympiad, Question, Test, Registration, ExamResult, Notification, Region, UserAchievement
+import base64
+import uuid
+from django.core.files.base import ContentFile
 class RegistrationSerializer(serializers.ModelSerializer):
     olympiad_title = serializers.ReadOnlyField(source='olympiad.title_ru')
     olympiad_type = serializers.ReadOnlyField(source='olympiad.olympiad_type')
@@ -24,12 +27,32 @@ class RegionSerializer(serializers.ModelSerializer):
         model = Region
         fields = ('id', 'name_uz', 'name_ru', 'name_en')
 
+class Base64ImageField(serializers.ImageField):
+    def to_internal_value(self, data):
+        if isinstance(data, str) and data.startswith('data:image'):
+            format, imgstr = data.split(';base64,')
+            ext = format.split('/')[-1]
+            id = uuid.uuid4()
+            data = ContentFile(base64.b64decode(imgstr), name=f"{id}.{ext}")
+        return super().to_internal_value(data)
+
 class QuestionSerializer(serializers.ModelSerializer):
     text = serializers.CharField(read_only=True)
+    image = Base64ImageField(required=False, allow_null=True)
 
     class Meta:
         model = Question
-        fields = ('id', 'test', 'text', 'image', 'options', 'correct_option', 
+        fields = ('id', 'test', 'text', 'image', 'options',
+                  'text_ru', 'text_uz', 'text_en')
+
+class QuestionExamSerializer(serializers.ModelSerializer):
+    """Serializer used during the exam. EXCLUDES correct_option."""
+    text = serializers.CharField(read_only=True)
+    image = Base64ImageField(required=False, allow_null=True)
+
+    class Meta:
+        model = Question
+        fields = ('id', 'test', 'text', 'image', 'options',
                   'text_ru', 'text_uz', 'text_en')
 
     def to_representation(self, instance):
@@ -41,15 +64,50 @@ class QuestionSerializer(serializers.ModelSerializer):
         return result
 
 class TestSerializer(serializers.ModelSerializer):
-    questions = QuestionSerializer(many=True, read_only=True)
+    """Base Test Serializer (Safe for list views)"""
     class Meta:
         model = Test
-        fields = ('id', 'olympiad', 'title', 'questions')
+        fields = ('id', 'olympiad', 'sub_olympiad', 'title')
+
+    def validate(self, attrs):
+        olympiad = attrs.get('olympiad')
+        sub_olympiad = attrs.get('sub_olympiad')
+
+        # Если указана олимпиада, но нет саб-олимпиады, проверяем, нет ли у олимпиады сабов
+        if olympiad and not sub_olympiad:
+            if olympiad.subs.exists():
+                raise serializers.ValidationError({
+                    "olympiad": "Эта олимпиада состоит из нескольких предметов. Создайте тест для конкретного предмета."
+                })
+        
+        # Если указано и то, и другое (что странно для 1-к-1), или ничего
+        if not olympiad and not sub_olympiad:
+             raise serializers.ValidationError("Необходимо указать либо олимпиаду, либо предмет.")
+
+        return attrs
+
+class SubOlympiadSerializer(serializers.ModelSerializer):
+    title = serializers.SerializerMethodField()
+    test = TestSerializer(read_only=True)
+    
+    class Meta:
+        model = SubOlympiad
+        fields = ('id', 'olympiad', 'title', 'title_ru', 'title_uz', 'title_en', 
+                  'start_datetime', 'duration_minutes', 'is_started', 'is_completed', 'test')
+        extra_kwargs = {
+            'olympiad': {'required': False}
+        }
+
+    def get_title(self, obj):
+        request = self.context.get('request')
+        lang = request.query_params.get('lang', 'uz') if request and hasattr(request, 'query_params') else 'uz'
+        return obj.get_translated('title', lang)
 
 class ExamResultSerializer(serializers.ModelSerializer):
+    sub_olympiad_title = serializers.ReadOnlyField(source='sub_olympiad.title_ru')
     class Meta:
         model = ExamResult
-        fields = ('id', 'olympiad', 'score', 'completed_at')
+        fields = ('id', 'olympiad', 'sub_olympiad', 'sub_olympiad_title', 'score', 'completed_at')
 
 class NotificationSerializer(serializers.ModelSerializer):
     title = serializers.SerializerMethodField()
@@ -118,12 +176,14 @@ class OlympiadSerializer(serializers.ModelSerializer):
     registered_count = serializers.SerializerMethodField()
 
     test = TestSerializer(read_only=True)
+    subs = SubOlympiadSerializer(many=True, required=False)
+    
     class Meta:
         model = Olympiad
         fields = ('id', 'title', 'description', 'olympiad_type', 'price', 'is_free',
                   'start_datetime', 'duration_minutes', 'max_participants', 'registration_end_date',
                   'is_active', 'is_started', 'is_completed', 'seats_remaining', 'is_registered', 'registered_count',
-                  'grades', 'region_ids', 'test',
+                  'grades', 'region_ids', 'test', 'subs',
                   'title_ru', 'title_uz', 'title_en', 'description_ru', 'description_uz', 'description_en')
 
     def get_registered_count(self, obj):
@@ -156,4 +216,42 @@ class OlympiadSerializer(serializers.ModelSerializer):
                 return obj.registrations.filter(user=request.user).exclude(payment_status='expired').exists()
         except: pass
         return False
+
+    def create(self, validated_data):
+        subs_data = validated_data.pop('subs', [])
+        
+        # Авто-расчет даты начала и длительности по предметам
+        if subs_data:
+            start_dates = [s.get('start_datetime') for s in subs_data if s.get('start_datetime')]
+            if start_dates:
+                validated_data['start_datetime'] = min(start_dates)
+            validated_data['duration_minutes'] = sum(s.get('duration_minutes', 0) for s in subs_data)
+            
+        olympiad = Olympiad.objects.create(**validated_data)
+        
+        for sub_data in subs_data:
+            SubOlympiad.objects.create(olympiad=olympiad, **sub_data)
+            
+        return olympiad
+
+    def update(self, instance, validated_data):
+        subs_data = validated_data.pop('subs', None)
+        
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+            
+        if subs_data is not None:
+            # Обновляем предметы: удаляем старые и создаем новые (простейший способ для админки)
+            instance.subs.all().delete()
+            for sub_data in subs_data:
+                SubOlympiad.objects.create(olympiad=instance, **sub_data)
+            
+            # Пересчитываем дату и длительность
+            start_dates = [s.get('start_datetime') for s in subs_data if s.get('start_datetime')]
+            if start_dates:
+                instance.start_datetime = min(start_dates)
+            instance.duration_minutes = sum(s.get('duration_minutes', 0) for s in subs_data)
+        
+        instance.save()
+        return instance
 

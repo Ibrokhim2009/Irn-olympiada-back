@@ -109,8 +109,8 @@ class Olympiad(models.Model):
     price = models.BigIntegerField(default=0, help_text="Цена в UZS (целое число)")
     is_free = models.BooleanField(default=False, verbose_name="Бесплатно")
     
-    start_datetime = models.DateTimeField(db_index=True)
-    duration_minutes = models.PositiveIntegerField(default=60)
+    start_datetime = models.DateTimeField(db_index=True, null=True, blank=True)
+    duration_minutes = models.PositiveIntegerField(default=60, null=True, blank=True)
     
     registration_end_date = models.DateTimeField(null=True, blank=True, verbose_name="Дата окончания регистрации")
     max_participants = models.PositiveIntegerField(null=True, blank=True, default=0, verbose_name="Макс. количество участников (0 - без лимита)")
@@ -148,13 +148,47 @@ class Olympiad(models.Model):
             if val: return val
         return ""
 
+# ==================== СУБ-ОЛИМПИАДЫ (ПРЕДМЕТЫ) ====================
+class SubOlympiad(models.Model):
+    olympiad = models.ForeignKey(Olympiad, on_delete=models.CASCADE, related_name='subs')
+    title_ru = models.CharField(max_length=255, null=True, blank=True)
+    title_uz = models.CharField(max_length=255, null=True, blank=True)
+    title_en = models.CharField(max_length=255, null=True, blank=True)
+    
+    start_datetime = models.DateTimeField(db_index=True)
+    duration_minutes = models.PositiveIntegerField(default=60)
+    
+    is_started = models.BooleanField(default=False, verbose_name="Запущена вручную")
+    is_completed = models.BooleanField(default=False, verbose_name="Завершена")
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.olympiad.title_ru} - {self.title_ru}"
+
+    class Meta:
+        verbose_name = "Суб-олимпиада"
+        verbose_name_plural = "Суб-олимпиады"
+        ordering = ['start_datetime']
+
+    def get_translated(self, field, lang):
+        val = getattr(self, f"{field}_{lang}", None)
+        if val: return val
+        for l in ['uz', 'ru', 'en']:
+            val = getattr(self, f"{field}_{l}", None)
+            if val: return val
+        return ""
+
 # ==================== ТЕСТЫ И ВОПРОСЫ ====================
 class Test(models.Model):
-    olympiad = models.OneToOneField(Olympiad, on_delete=models.CASCADE, related_name='test')
+    olympiad = models.OneToOneField(Olympiad, on_delete=models.CASCADE, related_name='test', null=True, blank=True)
+    sub_olympiad = models.OneToOneField(SubOlympiad, on_delete=models.CASCADE, related_name='test', null=True, blank=True)
     title = models.CharField(max_length=255)
 
     def __str__(self):
-        return f"Test for {self.olympiad.title_ru}"
+        target = self.olympiad or self.sub_olympiad
+        title = getattr(target, 'title_ru', 'Unknown') if target else 'Unknown'
+        return f"Test for {title}"
 
 class Question(models.Model):
     test = models.ForeignKey(Test, on_delete=models.CASCADE, related_name='questions')
@@ -175,7 +209,10 @@ class Question(models.Model):
         return ""
 
     def __str__(self):
-        return f"Q in {self.test.olympiad.title_ru}"
+        test = self.test
+        target = test.olympiad or test.sub_olympiad
+        title = getattr(target, 'title_ru', 'Unknown') if target else 'Unknown'
+        return f"Q in {title}"
 
 class Registration(models.Model):
     class PaymentStatus(models.TextChoices):
@@ -236,15 +273,20 @@ class Registration(models.Model):
 
 class ExamResult(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='exam_results')
-    olympiad = models.ForeignKey(Olympiad, on_delete=models.CASCADE, related_name='exam_results')
-    score = models.PositiveIntegerField()
-    answers_json = models.JSONField(help_text="Сырые ответы пользователя для анализа")
-    completed_at = models.DateTimeField(auto_now_add=True)
+    olympiad = models.ForeignKey(Olympiad, on_delete=models.CASCADE, related_name='exam_results', null=True, blank=True)
+    sub_olympiad = models.ForeignKey(SubOlympiad, on_delete=models.CASCADE, related_name='exam_results', null=True, blank=True)
+    
+    score = models.PositiveIntegerField(null=True, blank=True)
+    answers_json = models.JSONField(null=True, blank=True, help_text="Сырые ответы пользователя для анализа")
+    tab_switches = models.PositiveIntegerField(default=0, help_text="Количество переключений вкладок")
+    
+    start_time = models.DateTimeField(default=timezone.now)
+    completed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         verbose_name = "Результат экзамена"
         verbose_name_plural = "Результаты экзаменов"
-        unique_together = ('user', 'olympiad')
+        unique_together = ('user', 'olympiad', 'sub_olympiad')
 
     def __str__(self):
         return f"{self.user.username} - {self.score}%"

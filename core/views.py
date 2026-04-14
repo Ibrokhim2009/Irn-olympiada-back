@@ -1,6 +1,7 @@
 from django.db import models
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, status, permissions, viewsets
+from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -12,12 +13,14 @@ from rest_framework import response
 from payme import Payme
 from .serializers import (
     RegisterSerializer, UserSerializer, LoginRequestSerializer,
-    OlympiadSerializer, QuestionSerializer, RegistrationSerializer,
+    OlympiadSerializer, SubOlympiadSerializer, QuestionSerializer, QuestionExamSerializer, RegistrationSerializer,
     TestSerializer, NotificationSerializer, RegionSerializer
 )
-from .models import User, Olympiad, Registration, ExamResult, Test, Question, Notification, Region
+from .models import User, Olympiad, SubOlympiad, Registration, ExamResult, Test, Question, Notification, Region
 from .permissions import IsAdminUserOrReadOnly
 from .utils_payme import get_payme_link
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
 
 
 class RegionViewSet(viewsets.ModelViewSet):
@@ -30,6 +33,84 @@ class TestViewSet(viewsets.ModelViewSet):
     queryset = Test.objects.all()
     serializer_class = TestSerializer
     permission_classes = (IsAdminUserOrReadOnly,)
+
+    def create(self, request, *args, **kwargs):
+        olympiad_id = request.data.get('olympiad')
+        sub_olympiad_id = request.data.get('sub_olympiad')
+        
+        # Пытаемся найти существующий тест или создать новый
+        test, created = Test.objects.get_or_create(
+            olympiad_id=olympiad_id,
+            sub_olympiad_id=sub_olympiad_id,
+            defaults={
+                'title': request.data.get('title', f"Test for {sub_olympiad_id or olympiad_id}")
+            }
+        )
+        
+        serializer = self.get_serializer(test)
+        status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
+        return Response(serializer.data, status=status_code)
+
+
+class SubOlympiadViewSet(viewsets.ModelViewSet):
+    queryset = SubOlympiad.objects.all()
+    serializer_class = SubOlympiadSerializer
+    permission_classes = (IsAdminUserOrReadOnly,)
+
+    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAdminUser])
+    def start_now(self, request, pk=None):
+        sub = self.get_object()
+        sub.is_started = True
+        sub.is_completed = False
+        sub.save()
+        
+        # Уведомляем тех, кто зарегистрирован на основную олимпиаду
+        olympiad = sub.olympiad
+        regs = olympiad.registrations.filter(payment_status__in=['paid', 'free'])
+        
+        notifs_to_create = []
+        for reg in regs:
+            notifs_to_create.append(Notification(
+                user=reg.user,
+                title_ru=f"Предмет {sub.title_ru} начался!",
+                title_uz=f"Fan {sub.title_uz} boshlandi!",
+                title_en=f"Subject {sub.title_en} started!",
+                message_ru=f"Вы можете приступить к выполнению заданий по предмету {sub.title_ru} в личном кабинете.",
+                message_uz=f"Shaxsiy kabinetda {sub.title_uz} fani bo'yicha topshiriqlarni bajarishni boshlashingiz mumkin.",
+                message_en=f"You can start taking the test for {sub.title_en} in your dashboard.",
+                type='success'
+            ))
+        
+        created_notifs = Notification.objects.bulk_create(notifs_to_create)
+        
+        # Мгновенная рассылка через вебсокеты
+        channel_layer = get_channel_layer()
+        for notif in created_notifs:
+            async_to_sync(channel_layer.group_send)(
+                f'user_{notif.user.id}',
+                {
+                    'type': 'notification_send',
+                    'data': {
+                        'id': notif.id,
+                        'title_ru': notif.title_ru,
+                        'title_uz': notif.title_uz,
+                        'message_ru': notif.message_ru,
+                        'message_uz': notif.message_uz,
+                        'type': notif.type,
+                        'created_at': timezone.now().isoformat()
+                    }
+                }
+            )
+            
+        return Response({'status': 'Sub-Olympiad started'})
+
+    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAdminUser])
+    def finish_now(self, request, pk=None):
+        sub = self.get_object()
+        sub.is_completed = True
+        sub.is_started = False
+        sub.save()
+        return Response({'status': 'Sub-Olympiad finished'})
 
 
 class QuestionViewSet(viewsets.ModelViewSet):
@@ -207,9 +288,6 @@ class PaymeCallbackView(PaymeWebHookAPIView):
             print(f"❌ Registration {reg_id} not found during payme callback")
 
 
-from rest_framework.decorators import action
-
-
 class OlympiadViewSet(viewsets.ModelViewSet):
     queryset = Olympiad.objects.all()
     serializer_class = OlympiadSerializer
@@ -226,25 +304,51 @@ class OlympiadViewSet(viewsets.ModelViewSet):
         olympiad.is_started = True
         olympiad.is_completed = False
         olympiad.save()
+        
+        # Уведомляем тех, кто зарегистрирован
         regs = olympiad.registrations.filter(payment_status__in=['paid', 'free'])
+        
+        notifs_to_create = []
         for reg in regs:
-            Notification.objects.create(
+            notifs_to_create.append(Notification(
                 user=reg.user,
                 title_ru=f"Олимпиада {olympiad.title_ru} началась!",
                 title_uz=f"Olimpiada {olympiad.title_uz} boshlandi!",
                 title_en=f"Olympiad {olympiad.title_en} started!",
-                message_ru="Вы можете приступить к выполнению заданий в личном кабинете.",
-                message_uz="Shaxsiy kabinetda topshiriqlarni bajarishni boshlashingiz mumkin.",
-                message_en="You can start taking the test in your dashboard.",
+                message_ru=f"Олимпиада началась. Вы можете приступить к выполнению предметов в личном кабинете.",
+                message_uz=f"Olimpiada boshlandi. Shaxsiy kabinetda fanlarni bajarishni boshlashingiz mumkin.",
+                message_en=f"The olympiad has started. You can now start the test in your dashboard.",
                 type='success'
+            ))
+            
+        created_notifs = Notification.objects.bulk_create(notifs_to_create)
+        
+        # Мгновенная рассылка через вебсокеты
+        channel_layer = get_channel_layer()
+        for notif in created_notifs:
+            async_to_sync(channel_layer.group_send)(
+                f'user_{notif.user.id}',
+                {
+                    'type': 'notification_send',
+                    'data': {
+                        'id': notif.id,
+                        'title_ru': notif.title_ru,
+                        'title_uz': notif.title_uz,
+                        'message_ru': notif.message_ru,
+                        'message_uz': notif.message_uz,
+                        'type': notif.type,
+                        'created_at': timezone.now().isoformat()
+                    }
+                }
             )
+            
         return Response({'status': 'Olympiad started'})
 
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAdminUser])
     def finish_now(self, request, pk=None):
         olympiad = self.get_object()
-        olympiad.is_completed = True
         olympiad.is_started = False
+        olympiad.is_completed = True
         olympiad.save()
         return Response({'status': 'Olympiad finished'})
 
@@ -352,13 +456,40 @@ class ExamView(APIView):
     permission_classes = (permissions.IsAuthenticated,)
 
     @swagger_auto_schema(responses={200: QuestionSerializer(many=True)})
-    def get(self, request, olympiad_id):
-        registration = generics.get_object_or_404(Registration, user=request.user, olympiad_id=olympiad_id)
+    def get(self, request, sub_olympiad_id):
+        sub = generics.get_object_or_404(SubOlympiad, pk=sub_olympiad_id)
+        registration = generics.get_object_or_404(Registration, user=request.user, olympiad=sub.olympiad)
+        
         if registration.payment_status not in ['paid', 'free']:
             return Response({'error': 'Оплата не подтверждена'}, status=status.HTTP_403_FORBIDDEN)
-        test = generics.get_object_or_404(Test, olympiad_id=olympiad_id)
-        serializer = QuestionSerializer(test.questions.all(), many=True, context={'request': request})
-        return Response(serializer.data)
+        
+        # ✅ Check if already completed
+        existing_result = ExamResult.objects.filter(user=request.user, sub_olympiad=sub).first()
+        if existing_result and existing_result.completed_at:
+             return Response({'error': 'Вы уже завершили этот тест'}, status=status.HTTP_403_FORBIDDEN)
+
+        # ✅ Record attempt start time if it doesn't exist
+        if not existing_result:
+            existing_result = ExamResult.objects.create(
+                user=request.user,
+                olympiad=sub.olympiad,
+                sub_olympiad=sub,
+                start_time=timezone.now()
+            )
+
+        try:
+            test = sub.test
+        except Test.DoesNotExist:
+            return Response({'error': 'Тест не найден для этого предмета'}, status=404)
+            
+        serializer = QuestionExamSerializer(test.questions.all(), many=True, context={'request': request})
+        
+        return Response({
+            'questions': serializer.data,
+            'start_time': existing_result.start_time,
+            'server_time': timezone.now(),
+            'duration_minutes': sub.duration_minutes
+        })
 
 
 class SubmitResultView(APIView):
@@ -373,16 +504,41 @@ class SubmitResultView(APIView):
             }
         )
     )
-    def post(self, request, olympiad_id):
-        olympiad = generics.get_object_or_404(Olympiad, pk=olympiad_id)
-        score = request.data.get('score')
-        answers = request.data.get('answers')
+    def post(self, request, sub_olympiad_id):
+        sub = generics.get_object_or_404(SubOlympiad, pk=sub_olympiad_id)
+        answers = request.data.get('answers', {})
+        tab_switches = request.data.get('tab_switches', 0)
 
-        ExamResult.objects.get_or_create(
-            user=request.user,
-            olympiad=olympiad,
-            defaults={'score': score, 'answers_json': answers}
-        )
+        # ✅ Find the ongoing result/attempt
+        result = generics.get_object_or_404(ExamResult, user=request.user, sub_olympiad=sub)
+        
+        if result.completed_at:
+            return Response({'error': 'Test already submitted'}, status=400)
+
+        # ✅ Backend Grading
+        try:
+            test = sub.test
+        except Test.DoesNotExist:
+            return Response({'error': 'Test not found'}, status=404)
+
+        questions = test.questions.all()
+        if not questions.exists():
+             return Response({'error': 'Test has no questions'}, status=400)
+
+        correct_count = 0
+        for q in questions:
+            student_answer = answers.get(str(q.id))
+            if student_answer == q.correct_option:
+                correct_count += 1
+        
+        score = round((correct_count / questions.count()) * 100) if questions.count() > 0 else 0
+
+        # ✅ Update existing result
+        result.score = score
+        result.answers_json = answers
+        result.tab_switches = tab_switches
+        result.completed_at = timezone.now()
+        result.save()
 
         from .models import UserAchievement
         if score >= 90:
@@ -664,6 +820,26 @@ class SendNotificationView(APIView):
             users_to_notify = User.objects.none()
 
         notifs_to_create = [Notification(user=u, **data) for u in users_to_notify.distinct()]
-        Notification.objects.bulk_create(notifs_to_create)
+        created_notifs = Notification.objects.bulk_create(notifs_to_create)
 
-        return Response({'success': True, 'count': len(notifs_to_create)})
+        # Trigger manual broadcasts since bulk_create skips signals
+        channel_layer = get_channel_layer()
+
+        for notif in created_notifs:
+            async_to_sync(channel_layer.group_send)(
+                f'user_{notif.user.id}',
+                {
+                    'type': 'notification_send',
+                    'data': {
+                        'id': notif.id,
+                        'title_ru': notif.title_ru,
+                        'title_uz': notif.title_uz,
+                        'message_ru': notif.message_ru,
+                        'message_uz': notif.message_uz,
+                        'type': notif.type,
+                        'created_at': timezone.now().isoformat()
+                    }
+                }
+            )
+
+        return Response({'success': True, 'count': len(created_notifs)})

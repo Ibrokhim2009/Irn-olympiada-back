@@ -1,17 +1,27 @@
+import os
 from pathlib import Path
 from datetime import timedelta
 
+def load_env(env_path):
+    if os.path.exists(env_path):
+        with open(env_path) as f:
+            for line in f:
+                if line.strip() and not line.startswith('#'):
+                    key, value = line.strip().split('=', 1)
+                    os.environ.setdefault(key, value)
+
 BASE_DIR = Path(__file__).resolve().parent.parent
+load_env(BASE_DIR / '.env')
 
-SECRET_KEY = 'django-insecure-b7gr=z&s#*l&*e8p1s1$vds3h=(m08f&cwv7^^wv6o=-2(53ac'
+SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-fallback-key')
+DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'
 
-DEBUG = True
-
-ALLOWED_HOSTS = ['irnolympiad.uz', 'www.irnolympiad.uz', '127.0.0.1', 'localhost', 'x8k2m9f3.irnolympiad.uz']
+ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', '').split(',')
 
 AUTH_USER_MODEL = 'core.User'
 
 INSTALLED_APPS = [
+    'daphne',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -22,15 +32,16 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt',
     'corsheaders',
     'drf_yasg',
+    'channels',
     'core',
     'payme',
 ]
 
 # ✅ PAYME SETTINGS
-PAYTECH_LICENSE_API_KEY = "8KVdgthX#1DA#EvIRW5W6oMHB5GbeD21Of06"
-PAYME_ID = "69b40f0436da3282aa5b48fc"
-PAYME_KEY = "8KVdgthX#1DA#EvIRW5W6oMHB5GbeD21Of06"
-PAYME_TEST_KEY = "0BcTiqm3SEt2Ra#bF4F1W1oFtO5@u@rMOdc0"
+PAYTECH_LICENSE_API_KEY = os.getenv('PAYTECH_LICENSE_API_KEY')
+PAYME_ID = os.getenv('PAYME_ID')
+PAYME_KEY = os.getenv('PAYME_KEY')
+PAYME_TEST_KEY = os.getenv('PAYME_TEST_KEY')
 PAYME_URL = "https://checkout.paycom.uz"
 PAYME_ACCOUNT_FIELD = 'registration_id'
 PAYME_AMOUNT_FIELD = 'price'
@@ -69,7 +80,7 @@ SWAGGER_SETTINGS = {
 
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(days=1),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=30),
     'ROTATE_REFRESH_TOKENS': True,
     'ALGORITHM': 'HS256',
     'AUTH_HEADER_TYPES': ('Bearer',),
@@ -112,6 +123,14 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'src.wsgi.application'
+ASGI_APPLICATION = 'src.asgi.application'
+
+# Channel layer configuration (InMemory for dev)
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels.layers.InMemoryChannelLayer',
+    },
+}
 
 DATABASES = {
     'default': {
