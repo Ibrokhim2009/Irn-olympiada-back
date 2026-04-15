@@ -10,7 +10,7 @@ from rest_framework_simplejwt.views import (
 )
 from .views import (
     OlympiadViewSet, SubOlympiadViewSet, RegisterForOlympiadView, 
-    ExamView, SubmitResultView, ResultAnalysisView,
+    ExamView, SubmitResultView, ResultAnalysisView, PersonalResultsListView,
     RegisterView,LoginView,UserProfileView,
     TestViewSet, QuestionViewSet, UserViewSet,
     RegistrationViewSet, PaymeCallbackView, ClickCallbackView, GetPaymeLinkView,
@@ -54,6 +54,7 @@ urlpatterns = [
     path('exams/<int:sub_olympiad_id>/questions/', ExamView.as_view(), name='exam-questions'),
     path('exams/<int:sub_olympiad_id>/submit/', SubmitResultView.as_view(), name='exam-submit'),
     path('exams/<int:olympiad_id>/analysis/', ResultAnalysisView.as_view(), name='exam-analysis'),
+    path('exams/personal-results/', PersonalResultsListView.as_view(), name='personal-results'),
 
     path('payments/payme/', PaymeCallbackView.as_view(), name='payme-callback'),
     path('payments/click/', ClickCallbackView.as_view(), name='click-callback'),

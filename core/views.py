@@ -85,6 +85,16 @@ class SubOlympiadViewSet(viewsets.ModelViewSet):
         
         # Мгновенная рассылка через вебсокеты
         channel_layer = get_channel_layer()
+
+        # 1. Global broadcast for button updates
+        async_to_sync(channel_layer.group_send)(
+            'olympiads',
+            {
+                'type': 'olympiad_update',
+                'data': {'event': 'STARTED', 'id': sub.id, 'is_sub': True}
+            }
+        )
+
         for notif in created_notifs:
             async_to_sync(channel_layer.group_send)(
                 f'user_{notif.user.id}',
@@ -107,9 +117,20 @@ class SubOlympiadViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAdminUser])
     def finish_now(self, request, pk=None):
         sub = self.get_object()
-        sub.is_completed = True
         sub.is_started = False
+        sub.is_completed = True
         sub.save()
+
+        # Broadcast update
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(
+            'olympiads',
+            {
+                'type': 'olympiad_update',
+                'data': {'event': 'FINISHED', 'id': sub.id, 'is_sub': True}
+            }
+        )
+
         return Response({'status': 'Sub-Olympiad finished'})
 
 
@@ -225,6 +246,18 @@ class UserViewSet(viewsets.ModelViewSet):
     search_fields = ['username', 'first_name', 'last_name', 'middle_name', 'phone', 'participant_id']
     ordering_fields = ['date_joined', 'first_name', 'last_name']
 
+    @action(detail=True, methods=['post'])
+    def reset_password(self, request, pk=None):
+        user = self.get_object()
+        new_password = request.data.get('new_password')
+        
+        if not new_password:
+            return Response({'error': 'Пароль не может быть пустым'}, status=400)
+            
+        user.set_password(new_password)
+        user.save()
+        return Response({'success': True, 'message': f'Пароль для {user.username} успешно обновлен'})
+
 
 class RegistrationViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = RegistrationSerializer
@@ -325,6 +358,16 @@ class OlympiadViewSet(viewsets.ModelViewSet):
         
         # Мгновенная рассылка через вебсокеты
         channel_layer = get_channel_layer()
+
+        # 1. Global broadcast for button updates
+        async_to_sync(channel_layer.group_send)(
+            'olympiads',
+            {
+                'type': 'olympiad_update',
+                'data': {'event': 'STARTED', 'id': olympiad.id, 'is_sub': False}
+            }
+        )
+
         for notif in created_notifs:
             async_to_sync(channel_layer.group_send)(
                 f'user_{notif.user.id}',
@@ -350,6 +393,17 @@ class OlympiadViewSet(viewsets.ModelViewSet):
         olympiad.is_started = False
         olympiad.is_completed = True
         olympiad.save()
+
+        # Broadcast update
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(
+            'olympiads',
+            {
+                'type': 'olympiad_update',
+                'data': {'event': 'FINISHED', 'id': olympiad.id, 'is_sub': False}
+            }
+        )
+
         return Response({'status': 'Olympiad finished'})
 
 
@@ -719,24 +773,54 @@ class ResultAnalysisView(APIView):
 
     def get(self, request, olympiad_id):
         olympiad = get_object_or_404(Olympiad, id=olympiad_id)
+        sub_id = request.query_params.get('sub_id')
+        lang = request.query_params.get('lang', 'uz')
 
-        try:
-            my_result = ExamResult.objects.get(user=request.user, olympiad=olympiad)
-        except ExamResult.DoesNotExist:
+        # ✅ Find the specific result
+        query = ExamResult.objects.filter(user=request.user, olympiad=olympiad)
+        if sub_id:
+            query = query.filter(sub_olympiad_id=sub_id)
+        
+        my_result = query.first()
+        if not my_result:
             return Response({'error': 'Result not found'}, status=404)
 
-        rank = ExamResult.objects.filter(olympiad=olympiad, score__gt=my_result.score).count() + 1
-        total_participants = ExamResult.objects.filter(olympiad=olympiad).count()
+        if not my_result.completed_at or not my_result.start_time:
+             return Response({'error': 'Attempt data incomplete'}, status=400)
 
-        try:
-            test = olympiad.test
-        except:
+        # ✅ Ranking needs to be per sub_olympiad if it exists
+        rank_query = ExamResult.objects.filter(olympiad=olympiad, completed_at__isnull=False)
+        if my_result.sub_olympiad:
+             rank_query = rank_query.filter(sub_olympiad=my_result.sub_olympiad)
+        else:
+             rank_query = rank_query.filter(sub_olympiad__isnull=True)
+
+        my_duration = my_result.completed_at - my_result.start_time
+        from django.db.models import F, ExpressionWrapper, fields, Q
+        
+        better_results = rank_query.annotate(
+            duration=ExpressionWrapper(F('completed_at') - F('start_time'), output_field=fields.DurationField())
+        ).filter(
+            Q(score__gt=my_result.score) | 
+            Q(score=my_result.score, duration__lt=my_duration)
+        ).count()
+
+        rank = better_results + 1
+        total_participants = rank_query.count()
+
+        # ✅ Get the correct test for questions
+        test = None
+        if my_result.sub_olympiad:
+            test = getattr(my_result.sub_olympiad, 'test', None)
+        else:
+            test = getattr(olympiad, 'test', None)
+
+        if not test:
             return Response({'error': 'Test not found'}, status=404)
 
         questions_data = []
         user_answers = my_result.answers_json or {}
         correct_count = wrong_count = no_answer_count = 0
-        lang = request.query_params.get('lang', 'uz')
 
         for q in test.questions.all().order_by('id'):
             user_ans = user_answers.get(str(q.id))
@@ -759,7 +843,10 @@ class ResultAnalysisView(APIView):
                 'image': q.image.url if q.image else None
             })
 
-        leaderboard = ExamResult.objects.filter(olympiad=olympiad).order_by('-score', 'completed_at')[:10]
+        leaderboard = rank_query.annotate(
+            duration=ExpressionWrapper(F('completed_at') - F('start_time'), output_field=fields.DurationField())
+        ).order_by('-score', 'duration')[:10]
+
         leaderboard_data = [{
             'rank': i + 1,
             'username': res.user.username,
@@ -768,8 +855,11 @@ class ResultAnalysisView(APIView):
             'is_me': res.user == request.user
         } for i, res in enumerate(leaderboard)]
 
+        sub_title = my_result.sub_olympiad.get_translated('title', lang) if my_result.sub_olympiad else None
+        
         return Response({
             'olympiad_title': olympiad.get_translated('title', lang),
+            'sub_title': sub_title,
             'score': my_result.score,
             'completed_at': my_result.completed_at,
             'rank': rank,
@@ -783,6 +873,61 @@ class ResultAnalysisView(APIView):
             'questions': questions_data,
             'leaderboard': leaderboard_data
         })
+
+
+class PersonalResultsListView(APIView):
+    permission_classes = (permissions.IsAuthenticated,)
+
+    def get(self, request):
+        # Allow admins to view results of any user for testing
+        target_user = request.user
+        user_id = request.query_params.get('user_id')
+        
+        if user_id and request.user.is_staff:
+            try:
+                from .models import User
+                target_user = User.objects.get(id=user_id)
+            except User.DoesNotExist:
+                return Response({"error": "User not found"}, status=404)
+
+        # ✅ Get results only for completed olympiads (or items where admin allowed results)
+        results = ExamResult.objects.filter(
+            user=target_user, 
+            completed_at__isnull=False
+        ).select_related('olympiad', 'sub_olympiad')
+        
+        lang = request.query_params.get('lang', 'uz')
+        data = []
+        for res in results:
+            # AUTO-SHOW logic:
+            # 1. If olympiad is 'online' or free, show immediately
+            # 2. If olympiad is 'offline', wait for is_completed (admin signal)
+            
+            is_visible = False
+            if res.olympiad:
+                if res.olympiad.olympiad_type == 'online' or res.olympiad.is_free:
+                    is_visible = True
+                elif res.olympiad.is_completed:
+                    is_visible = True
+            else:
+                # Orphaned result but has a user and completion time - show it
+                is_visible = True
+
+            if not is_visible:
+                 continue
+
+            data.append({
+                'id': res.id,
+                'olympiad_id': res.olympiad.id if res.olympiad else None,
+                'olympiad_title': res.olympiad.get_translated('title', lang) if res.olympiad else "Unknown Olympiad",
+                'olympiad_type': res.olympiad.olympiad_type if res.olympiad else 'online',
+                'sub_id': res.sub_olympiad.id if res.sub_olympiad else None,
+                'sub_olympiad_title': res.sub_olympiad.get_translated('title', lang) if res.sub_olympiad else None,
+                'score': res.score,
+                'completed_at': res.completed_at,
+            })
+        
+        return Response(data)
 
 
 class SendNotificationView(APIView):

@@ -42,7 +42,7 @@ class QuestionSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Question
-        fields = ('id', 'test', 'text', 'image', 'options',
+        fields = ('id', 'test', 'text', 'image', 'options', 'correct_option',
                   'text_ru', 'text_uz', 'text_en')
 
 class QuestionExamSerializer(serializers.ModelSerializer):
@@ -64,10 +64,12 @@ class QuestionExamSerializer(serializers.ModelSerializer):
         return result
 
 class TestSerializer(serializers.ModelSerializer):
-    """Base Test Serializer (Safe for list views)"""
+    """Base Test Serializer (Includes nested questions for admin management)"""
+    questions = QuestionSerializer(many=True, read_only=True)
+
     class Meta:
         model = Test
-        fields = ('id', 'olympiad', 'sub_olympiad', 'title')
+        fields = ('id', 'olympiad', 'sub_olympiad', 'title', 'questions')
 
     def validate(self, attrs):
         olympiad = attrs.get('olympiad')
