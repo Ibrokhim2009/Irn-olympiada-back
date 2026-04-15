@@ -168,11 +168,12 @@ class LoginView(APIView):
         login_input = serializer.validated_data.get('username')
         password = serializer.validated_data.get('password')
 
-        # 1. Сначала пробуем аутентифицировать как обычно (по username/participant_id)
+        # 1. First, try to authenticate as usual (by username/participant_id)
         user = authenticate(username=login_input, password=password)
 
         if not user:
-            # 2. Если не вышло, проверяем, не телефон ли это
+            # 2. If it failed, check if the input is a phone number
+            # Normalize phone (ensure it has common format if needed, but here we trust the database match)
             users_with_phone = User.objects.filter(phone=login_input)
             
             valid_users = []
@@ -181,7 +182,7 @@ class LoginView(APIView):
                     valid_users.append(u)
             
             if len(valid_users) > 1:
-                # Найдено несколько аккаунтов на этот номер
+                # Multiple accounts found for this phone and password
                 accounts_data = [
                     {
                         'participant_id': u.participant_id,
@@ -192,13 +193,14 @@ class LoginView(APIView):
                 return Response({
                     'multiple_accounts': True,
                     'accounts': accounts_data,
-                    'message': 'Найдено несколько аккаунтов. Пожалуйста, выберите нужный.'
+                    'message': 'Multiple accounts found. Please choose one.'
                 }, status=status.HTTP_200_OK)
             
             elif len(valid_users) == 1:
+                # Exactly one account found for this phone
                 user = valid_users[0]
             
-            # 3. Пробуем по email (на всякий случай, как было раньше)
+            # 3. Check by email as a fallback
             if not user:
                 try:
                     found_user = User.objects.get(email=login_input)
@@ -215,7 +217,7 @@ class LoginView(APIView):
                 'access': str(refresh.access_token),
             })
         
-        return Response({'error': 'Неверный логин или пароль'}, status=status.HTTP_401_UNAUTHORIZED)
+        return Response({'error': 'Invalid username or password'}, status=status.HTTP_401_UNAUTHORIZED)
 
 
 class UserProfileView(generics.RetrieveUpdateAPIView):
