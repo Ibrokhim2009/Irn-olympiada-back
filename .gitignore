@@ -1,4 +1,4 @@
 /venvstaticfiles/
 staticfiles/
 db.sqlite3
-.env
+.env.example
