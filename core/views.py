@@ -11,12 +11,17 @@ from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 from rest_framework import response
 from payme import Payme
-from .serializers import (
+from .serializers import (  
     RegisterSerializer, UserSerializer, LoginRequestSerializer,
-    OlympiadSerializer, SubOlympiadSerializer, QuestionSerializer, QuestionExamSerializer, RegistrationSerializer,
+    OlympiadSerializer, SubOlympiadSerializer, SubOlympiadGradeSerializer,
+    QuestionSerializer, QuestionExamSerializer, RegistrationSerializer,
     TestSerializer, NotificationSerializer, RegionSerializer
 )
-from .models import User, Olympiad, SubOlympiad, Registration, ExamResult, Test, Question, Notification, Region
+from .models import (
+    User, Olympiad, SubOlympiad, SubOlympiadGrade,
+    Registration, ExamResult, Test, Question,
+    Notification, Region
+)
 from .permissions import IsAdminUserOrReadOnly
 from .utils_payme import get_payme_link
 from asgiref.sync import async_to_sync
@@ -37,16 +42,23 @@ class TestViewSet(viewsets.ModelViewSet):
     def create(self, request, *args, **kwargs):
         olympiad_id = request.data.get('olympiad')
         sub_olympiad_id = request.data.get('sub_olympiad')
-        
-        # Пытаемся найти существующий тест или создать новый
+        sub_olympiad_grade_id = request.data.get('sub_olympiad_grade')
+
+        lookup = {}
+        if sub_olympiad_grade_id:
+            lookup['sub_olympiad_grade_id'] = sub_olympiad_grade_id
+        elif sub_olympiad_id:
+            lookup['sub_olympiad_id'] = sub_olympiad_id
+        elif olympiad_id:
+            lookup['olympiad_id'] = olympiad_id
+
         test, created = Test.objects.get_or_create(
-            olympiad_id=olympiad_id,
-            sub_olympiad_id=sub_olympiad_id,
+            **lookup,
             defaults={
-                'title': request.data.get('title', f"Test for {sub_olympiad_id or olympiad_id}")
+                'title': request.data.get('title', f"Test for {sub_olympiad_grade_id or sub_olympiad_id or olympiad_id}")
             }
         )
-        
+
         serializer = self.get_serializer(test)
         status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
         return Response(serializer.data, status=status_code)
@@ -57,41 +69,52 @@ class SubOlympiadViewSet(viewsets.ModelViewSet):
     serializer_class = SubOlympiadSerializer
     permission_classes = (IsAdminUserOrReadOnly,)
 
+
+class SubOlympiadGradeViewSet(viewsets.ModelViewSet):
+    """
+    CRUD for grade-specific sessions within a subject.
+    Supports start_now / finish_now per-grade controls.
+    """
+    queryset = SubOlympiadGrade.objects.all()
+    serializer_class = SubOlympiadGradeSerializer
+    permission_classes = (IsAdminUserOrReadOnly,)
+
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAdminUser])
     def start_now(self, request, pk=None):
-        sub = self.get_object()
-        sub.is_started = True
-        sub.is_completed = False
-        sub.save()
-        
-        # Уведомляем тех, кто зарегистрирован на основную олимпиаду
-        olympiad = sub.olympiad
+        session = self.get_object()
+        session.is_started = True
+        session.is_completed = False
+        session.save()
+
+        olympiad = session.sub_olympiad.olympiad
         regs = olympiad.registrations.filter(payment_status__in=['paid', 'free'])
-        
+
         notifs_to_create = []
         for reg in regs:
+            user_grade = str(reg.user.grade or '').strip()
+            session_grade = str(session.grade).strip()
+            if user_grade != session_grade:
+                continue  # notify only participants of this grade
             notifs_to_create.append(Notification(
                 user=reg.user,
-                title_ru=f"Предмет {sub.title_ru} начался!",
-                title_uz=f"Fan {sub.title_uz} boshlandi!",
-                title_en=f"Subject {sub.title_en} started!",
-                message_ru=f"Вы можете приступить к выполнению заданий по предмету {sub.title_ru} в личном кабинете.",
-                message_uz=f"Shaxsiy kabinetda {sub.title_uz} fani bo'yicha topshiriqlarni bajarishni boshlashingiz mumkin.",
-                message_en=f"You can start taking the test for {sub.title_en} in your dashboard.",
+                title_ru=f"Предмет {session.sub_olympiad.title_ru} ({session.grade} кл.) начался!",
+                title_uz=f"Fan {session.sub_olympiad.title_uz} ({session.grade}-sinf) boshlandi!",
+                title_en=f"Subject {session.sub_olympiad.title_en} (Grade {session.grade}) started!",
+                message_ru=f"Вы можете приступить к тесту по предмету {session.sub_olympiad.title_ru} в личном кабинете.",
+                message_uz=f"Shaxsiy kabinetda {session.sub_olympiad.title_uz} fanidan testni boshlashingiz mumkin.",
+                message_en=f"You can now start the test for {session.sub_olympiad.title_en} in your dashboard.",
                 type='success'
             ))
-        
-        created_notifs = Notification.objects.bulk_create(notifs_to_create)
-        
-        # Мгновенная рассылка через вебсокеты
-        channel_layer = get_channel_layer()
 
-        # 1. Global broadcast for button updates
+        created_notifs = Notification.objects.bulk_create(notifs_to_create)
+
+        channel_layer = get_channel_layer()
         async_to_sync(channel_layer.group_send)(
             'olympiads',
             {
                 'type': 'olympiad_update',
-                'data': {'event': 'STARTED', 'id': sub.id, 'is_sub': True}
+                'data': {'event': 'GRADE_STARTED', 'session_id': session.id,
+                         'sub_id': session.sub_olympiad.id, 'grade': session.grade}
             }
         )
 
@@ -111,27 +134,26 @@ class SubOlympiadViewSet(viewsets.ModelViewSet):
                     }
                 }
             )
-            
-        return Response({'status': 'Sub-Olympiad started'})
+
+        return Response({'status': f'Grade {session.grade} session started'})
 
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAdminUser])
     def finish_now(self, request, pk=None):
-        sub = self.get_object()
-        sub.is_started = False
-        sub.is_completed = True
-        sub.save()
+        session = self.get_object()
+        session.is_started = False
+        session.is_completed = True
+        session.save()
 
-        # Broadcast update
         channel_layer = get_channel_layer()
         async_to_sync(channel_layer.group_send)(
             'olympiads',
             {
                 'type': 'olympiad_update',
-                'data': {'event': 'FINISHED', 'id': sub.id, 'is_sub': True}
+                'data': {'event': 'GRADE_FINISHED', 'session_id': session.id,
+                         'sub_id': session.sub_olympiad.id, 'grade': session.grade}
             }
         )
-
-        return Response({'status': 'Sub-Olympiad finished'})
+        return Response({'status': f'Grade {session.grade} session finished'})
 
 
 class QuestionViewSet(viewsets.ModelViewSet):
@@ -168,21 +190,13 @@ class LoginView(APIView):
         login_input = serializer.validated_data.get('username')
         password = serializer.validated_data.get('password')
 
-        # 1. First, try to authenticate as usual (by username/participant_id)
         user = authenticate(username=login_input, password=password)
 
         if not user:
-            # 2. If it failed, check if the input is a phone number
-            # Normalize phone (ensure it has common format if needed, but here we trust the database match)
             users_with_phone = User.objects.filter(phone=login_input)
-            
-            valid_users = []
-            for u in users_with_phone:
-                if u.check_password(password):
-                    valid_users.append(u)
-            
+            valid_users = [u for u in users_with_phone if u.check_password(password)]
+
             if len(valid_users) > 1:
-                # Multiple accounts found for this phone and password
                 accounts_data = [
                     {
                         'participant_id': u.participant_id,
@@ -195,12 +209,9 @@ class LoginView(APIView):
                     'accounts': accounts_data,
                     'message': 'Multiple accounts found. Please choose one.'
                 }, status=status.HTTP_200_OK)
-            
             elif len(valid_users) == 1:
-                # Exactly one account found for this phone
                 user = valid_users[0]
-            
-            # 3. Check by email as a fallback
+
             if not user:
                 try:
                     found_user = User.objects.get(email=login_input)
@@ -216,7 +227,7 @@ class LoginView(APIView):
                 'refresh': str(refresh),
                 'access': str(refresh.access_token),
             })
-        
+
         return Response({'error': 'Invalid username or password'}, status=status.HTTP_401_UNAUTHORIZED)
 
 
@@ -252,18 +263,17 @@ class UserViewSet(viewsets.ModelViewSet):
     def reset_password(self, request, pk=None):
         user = self.get_object()
         new_password = request.data.get('new_password')
-        
         if not new_password:
             return Response({'error': 'Пароль не может быть пустым'}, status=400)
-            
         user.set_password(new_password)
         user.save()
         return Response({'success': True, 'message': f'Пароль для {user.username} успешно обновлен'})
 
 
-class RegistrationViewSet(viewsets.ReadOnlyModelViewSet):
+class RegistrationViewSet(viewsets.ModelViewSet):
     serializer_class = RegistrationSerializer
     permission_classes = (permissions.IsAuthenticated,)
+    http_method_names = ['get', 'delete'] # Only allow GET and DELETE
 
     def get_queryset(self):
         Registration.objects.filter(
@@ -272,6 +282,13 @@ class RegistrationViewSet(viewsets.ReadOnlyModelViewSet):
             payment_deadline__lt=timezone.now()
         ).update(payment_status=Registration.PaymentStatus.EXPIRED)
         return Registration.objects.filter(user=self.request.user).order_by('-registered_at')
+
+    def perform_destroy(self, instance):
+        if instance.payment_status not in [Registration.PaymentStatus.PENDING, Registration.PaymentStatus.EXPIRED]:
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError("Нельзя отменить оплаченную регистрацию.")
+        instance.delete()
+
 
 
 class GetPaymeLinkView(APIView):
@@ -283,12 +300,10 @@ class GetPaymeLinkView(APIView):
         if registration.payment_status in ['paid', 'free']:
             return Response({'error': 'Already paid'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # ✅ Always use olympiad.price as source of truth
         amount = registration.olympiad.price
         if not amount or amount <= 0:
             return Response({'error': 'Invalid payment amount'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # ✅ Sync registration.price if it drifted
         if registration.price != amount:
             registration.price = amount
             registration.save(update_fields=['price'])
@@ -329,9 +344,28 @@ class OlympiadViewSet(viewsets.ModelViewSet):
     permission_classes = (IsAdminUserOrReadOnly,)
 
     def get_queryset(self):
-        if self.request.user.is_authenticated and self.request.user.role in ['admin', 'superadmin']:
+        user = self.request.user
+        if not user.is_authenticated:
+            return Olympiad.objects.filter(is_active=True)
+
+        if user.role in ['admin', 'superadmin']:
             return Olympiad.objects.all()
-        return Olympiad.objects.filter(is_active=True)
+
+        # For participants:
+        # 1. Shows olympiads they are registered for
+        # 2. Shows active olympiads that match their grade
+        reg_filter = models.Q(registrations__user=user)
+        
+        grade_filter = models.Q(is_active=True)
+        if user.grade:
+            user_grade = str(user.grade).strip()
+            grade_filter &= (
+                models.Q(grades=[]) | 
+                models.Q(subs__grade_sessions__grade__iexact=user_grade)
+            )
+        
+        return Olympiad.objects.filter(reg_filter | grade_filter).distinct()
+
 
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAdminUser])
     def start_now(self, request, pk=None):
@@ -339,10 +373,8 @@ class OlympiadViewSet(viewsets.ModelViewSet):
         olympiad.is_started = True
         olympiad.is_completed = False
         olympiad.save()
-        
-        # Уведомляем тех, кто зарегистрирован
+
         regs = olympiad.registrations.filter(payment_status__in=['paid', 'free'])
-        
         notifs_to_create = []
         for reg in regs:
             notifs_to_create.append(Notification(
@@ -350,43 +382,27 @@ class OlympiadViewSet(viewsets.ModelViewSet):
                 title_ru=f"Олимпиада {olympiad.title_ru} началась!",
                 title_uz=f"Olimpiada {olympiad.title_uz} boshlandi!",
                 title_en=f"Olympiad {olympiad.title_en} started!",
-                message_ru=f"Олимпиада началась. Вы можете приступить к выполнению предметов в личном кабинете.",
-                message_uz=f"Olimpiada boshlandi. Shaxsiy kabinetda fanlarni bajarishni boshlashingiz mumkin.",
-                message_en=f"The olympiad has started. You can now start the test in your dashboard.",
+                message_ru="Олимпиада началась. Вы можете приступить к выполнению предметов в личном кабинете.",
+                message_uz="Olimpiada boshlandi. Shaxsiy kabinetda fanlarni bajarishni boshlashingiz mumkin.",
+                message_en="The olympiad has started. You can now start the test in your dashboard.",
                 type='success'
             ))
-            
-        created_notifs = Notification.objects.bulk_create(notifs_to_create)
-        
-        # Мгновенная рассылка через вебсокеты
-        channel_layer = get_channel_layer()
 
-        # 1. Global broadcast for button updates
+        created_notifs = Notification.objects.bulk_create(notifs_to_create)
+        channel_layer = get_channel_layer()
         async_to_sync(channel_layer.group_send)(
             'olympiads',
-            {
-                'type': 'olympiad_update',
-                'data': {'event': 'STARTED', 'id': olympiad.id, 'is_sub': False}
-            }
+            {'type': 'olympiad_update', 'data': {'event': 'STARTED', 'id': olympiad.id, 'is_sub': False}}
         )
-
         for notif in created_notifs:
             async_to_sync(channel_layer.group_send)(
                 f'user_{notif.user.id}',
-                {
-                    'type': 'notification_send',
-                    'data': {
-                        'id': notif.id,
-                        'title_ru': notif.title_ru,
-                        'title_uz': notif.title_uz,
-                        'message_ru': notif.message_ru,
-                        'message_uz': notif.message_uz,
-                        'type': notif.type,
-                        'created_at': timezone.now().isoformat()
-                    }
-                }
+                {'type': 'notification_send', 'data': {
+                    'id': notif.id, 'title_ru': notif.title_ru, 'title_uz': notif.title_uz,
+                    'message_ru': notif.message_ru, 'message_uz': notif.message_uz,
+                    'type': notif.type, 'created_at': timezone.now().isoformat()
+                }}
             )
-            
         return Response({'status': 'Olympiad started'})
 
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAdminUser])
@@ -395,17 +411,11 @@ class OlympiadViewSet(viewsets.ModelViewSet):
         olympiad.is_started = False
         olympiad.is_completed = True
         olympiad.save()
-
-        # Broadcast update
         channel_layer = get_channel_layer()
         async_to_sync(channel_layer.group_send)(
             'olympiads',
-            {
-                'type': 'olympiad_update',
-                'data': {'event': 'FINISHED', 'id': olympiad.id, 'is_sub': False}
-            }
+            {'type': 'olympiad_update', 'data': {'event': 'FINISHED', 'id': olympiad.id, 'is_sub': False}}
         )
-
         return Response({'status': 'Olympiad finished'})
 
 
@@ -415,9 +425,9 @@ class RegisterForOlympiadView(APIView):
     @swagger_auto_schema(responses={201: RegistrationSerializer, 400: 'Ошибка'})
     def post(self, request, pk):
         olympiad = generics.get_object_or_404(Olympiad, pk=pk)
-
         now = timezone.now()
-        if now >= olympiad.start_datetime:
+
+        if olympiad.start_datetime and now >= olympiad.start_datetime:
             return Response({"error": "Регистрация закрыта: олимпиада уже началась"}, status=400)
 
         if olympiad.registration_end_date and now >= olympiad.registration_end_date:
@@ -450,7 +460,7 @@ class RegisterForOlympiadView(APIView):
             olympiad=olympiad,
             defaults={
                 'payment_status': initial_status,
-                'price': olympiad.price,  # ✅ stored in UZS (sum)
+                'price': olympiad.price,
                 'teacher_name': request.user.teacher_name,
                 'teacher_phone': request.user.teacher_phone,
             }
@@ -473,10 +483,8 @@ class RegisterForOlympiadView(APIView):
             UserAchievement.objects.get_or_create(
                 user=request.user, type='early_bird',
                 defaults={
-                    'title_ru': 'Ранняя пташка',
-                    'title_uz': 'Erta tong pahlavoni',
-                    'title_en': 'Early Bird',
-                    'icon': 'Bird'
+                    'title_ru': 'Ранняя пташка', 'title_uz': 'Erta tong pahlavoni',
+                    'title_en': 'Early Bird', 'icon': 'Bird'
                 }
             )
 
@@ -484,16 +492,13 @@ class RegisterForOlympiadView(APIView):
             UserAchievement.objects.get_or_create(
                 user=request.user, type='regular',
                 defaults={
-                    'title_ru': 'Постоянный участник',
-                    'title_uz': 'Doimiy ishtirokchi',
-                    'title_en': 'Regular Participant',
-                    'icon': 'Trophy'
+                    'title_ru': 'Постоянный участник', 'title_uz': 'Doimiy ishtirokchi',
+                    'title_en': 'Regular Participant', 'icon': 'Trophy'
                 }
             )
 
         response_data = RegistrationSerializer(registration).data
 
-        # ✅ Only generate payment link if price is valid
         if initial_status == Registration.PaymentStatus.PENDING:
             if registration.price and registration.price > 0:
                 try:
@@ -509,87 +514,92 @@ class RegisterForOlympiadView(APIView):
 
 
 class ExamView(APIView):
+    """
+    GET /api/exam/grade-session/<grade_session_id>/
+    Returns questions for the user's specific grade session.
+    """
     permission_classes = (permissions.IsAuthenticated,)
 
-    @swagger_auto_schema(responses={200: QuestionSerializer(many=True)})
-    def get(self, request, sub_olympiad_id):
-        sub = generics.get_object_or_404(SubOlympiad, pk=sub_olympiad_id)
-        registration = generics.get_object_or_404(Registration, user=request.user, olympiad=sub.olympiad)
-        
+    def get(self, request, grade_session_id):
+        session = generics.get_object_or_404(SubOlympiadGrade, pk=grade_session_id)
+
+        # Verify user's grade matches this session
+        user_grade = str(request.user.grade or '').strip()
+        if user_grade != str(session.grade).strip():
+            return Response({'error': 'Этот тест не предназначен для вашего класса'}, status=status.HTTP_403_FORBIDDEN)
+
+        # Verify registration for this olympiad
+        olympiad = session.sub_olympiad.olympiad
+        registration = generics.get_object_or_404(Registration, user=request.user, olympiad=olympiad)
+
         if registration.payment_status not in ['paid', 'free']:
             return Response({'error': 'Оплата не подтверждена'}, status=status.HTTP_403_FORBIDDEN)
-        
-        # ✅ Check if already completed
-        existing_result = ExamResult.objects.filter(user=request.user, sub_olympiad=sub).first()
-        if existing_result and existing_result.completed_at:
-             return Response({'error': 'Вы уже завершили этот тест'}, status=status.HTTP_403_FORBIDDEN)
 
-        # ✅ Record attempt start time if it doesn't exist
+        if not session.is_started or session.is_completed:
+            return Response({'error': 'Тест ещё не начался или уже завершён'}, status=status.HTTP_403_FORBIDDEN)
+
+        # Check if already completed
+        existing_result = ExamResult.objects.filter(
+            user=request.user, sub_olympiad_grade=session
+        ).first()
+
+        if existing_result and existing_result.completed_at:
+            return Response({'error': 'Вы уже завершили этот тест'}, status=status.HTTP_403_FORBIDDEN)
+
         if not existing_result:
             existing_result = ExamResult.objects.create(
                 user=request.user,
-                olympiad=sub.olympiad,
-                sub_olympiad=sub,
+                olympiad=olympiad,
+                sub_olympiad_grade=session,
                 start_time=timezone.now()
             )
 
         try:
-            test = sub.test
+            test = session.test
         except Test.DoesNotExist:
-            return Response({'error': 'Тест не найден для этого предмета'}, status=404)
-            
+            return Response({'error': 'Тест не найден для этого класса'}, status=404)
+
         serializer = QuestionExamSerializer(test.questions.all(), many=True, context={'request': request})
-        
         return Response({
             'questions': serializer.data,
             'start_time': existing_result.start_time,
             'server_time': timezone.now(),
-            'duration_minutes': sub.duration_minutes
+            'duration_minutes': session.duration_minutes
         })
 
 
 class SubmitResultView(APIView):
+    """
+    POST /api/exam/grade-session/<grade_session_id>/submit/
+    """
     permission_classes = (permissions.IsAuthenticated,)
 
-    @swagger_auto_schema(
-        request_body=openapi.Schema(
-            type=openapi.TYPE_OBJECT,
-            properties={
-                'score': openapi.Schema(type=openapi.TYPE_INTEGER),
-                'answers': openapi.Schema(type=openapi.TYPE_OBJECT)
-            }
-        )
-    )
-    def post(self, request, sub_olympiad_id):
-        sub = generics.get_object_or_404(SubOlympiad, pk=sub_olympiad_id)
+    def post(self, request, grade_session_id):
+        session = generics.get_object_or_404(SubOlympiadGrade, pk=grade_session_id)
         answers = request.data.get('answers', {})
         tab_switches = request.data.get('tab_switches', 0)
 
-        # ✅ Find the ongoing result/attempt
-        result = generics.get_object_or_404(ExamResult, user=request.user, sub_olympiad=sub)
-        
+        result = generics.get_object_or_404(
+            ExamResult, user=request.user, sub_olympiad_grade=session
+        )
+
         if result.completed_at:
             return Response({'error': 'Test already submitted'}, status=400)
 
-        # ✅ Backend Grading
         try:
-            test = sub.test
+            test = session.test
         except Test.DoesNotExist:
             return Response({'error': 'Test not found'}, status=404)
 
         questions = test.questions.all()
         if not questions.exists():
-             return Response({'error': 'Test has no questions'}, status=400)
+            return Response({'error': 'Test has no questions'}, status=400)
 
-        correct_count = 0
-        for q in questions:
-            student_answer = answers.get(str(q.id))
-            if student_answer == q.correct_option:
-                correct_count += 1
-        
+        correct_count = sum(
+            1 for q in questions if answers.get(str(q.id)) == q.correct_option
+        )
         score = round((correct_count / questions.count()) * 100) if questions.count() > 0 else 0
 
-        # ✅ Update existing result
         result.score = score
         result.answers_json = answers
         result.tab_switches = tab_switches
@@ -601,20 +611,16 @@ class SubmitResultView(APIView):
             UserAchievement.objects.get_or_create(
                 user=request.user, type='top_scorer',
                 defaults={
-                    'title_ru': 'Золотая медаль (Топ результат)',
-                    'title_uz': 'Oltin medal (Top natija)',
-                    'title_en': 'Gold Medal (Top Result)',
-                    'icon': 'Star'
+                    'title_ru': 'Золотая медаль (Топ результат)', 'title_uz': 'Oltin medal (Top natija)',
+                    'title_en': 'Gold Medal (Top Result)', 'icon': 'Star'
                 }
             )
         elif score >= 70:
             UserAchievement.objects.get_or_create(
                 user=request.user, type='silver',
                 defaults={
-                    'title_ru': 'Серебряная медаль',
-                    'title_uz': 'Kumush medal',
-                    'title_en': 'Silver Medal',
-                    'icon': 'Award'
+                    'title_ru': 'Серебряная медаль', 'title_uz': 'Kumush medal',
+                    'title_en': 'Silver Medal', 'icon': 'Award'
                 }
             )
 
@@ -623,10 +629,8 @@ class SubmitResultView(APIView):
             UserAchievement.objects.get_or_create(
                 user=request.user, type='night_owl',
                 defaults={
-                    'title_ru': 'Ночная сова',
-                    'title_uz': 'Tun qushi',
-                    'title_en': 'Night Owl',
-                    'icon': 'Moon'
+                    'title_ru': 'Ночная сова', 'title_uz': 'Tun qushi',
+                    'title_en': 'Night Owl', 'icon': 'Moon'
                 }
             )
 
@@ -647,7 +651,6 @@ class NotificationViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         return Notification.objects.filter(user=self.request.user)
 
-    @swagger_auto_schema(responses={200: '{"success": true}'})
     @action(detail=True, methods=['post'])
     def mark_as_read(self, request, pk=None):
         notification = self.get_object()
@@ -674,27 +677,6 @@ class SeedNotificationsView(APIView):
                 'message_ru': 'Добро пожаловать на платформу IRN Olympiads.',
                 'message_en': 'Welcome to the IRN Olympiads platform.'
             },
-            {
-                'type': Notification.Type.SUCCESS,
-                'title_uz': 'Profil tasdiqlandi', 'title_ru': 'Профиль подтвержден', 'title_en': 'Profile Verified',
-                'message_uz': 'Sizning bir martalik kodingiz muvaffaqiyatli qabul qilindi.',
-                'message_ru': 'Ваш одноразовый код успешно принят.',
-                'message_en': 'Your one-time code has been successfully accepted.'
-            },
-            {
-                'type': Notification.Type.WARNING,
-                'title_uz': 'Muhim eslatma', 'title_ru': 'Важное напоминание', 'title_en': 'Important Reminder',
-                'message_uz': 'Matematika olimpiadasi ertaga soat 10:00 da boshlanadi.',
-                'message_ru': 'Олимпиада по математике начнется завтра в 10:00.',
-                'message_en': 'The Math Olympiad starts tomorrow at 10:00 AM.'
-            },
-            {
-                'type': Notification.Type.PAYMENT,
-                'title_uz': "To'lov kutilmoqda", 'title_ru': 'Ожидается оплата', 'title_en': 'Payment Pending',
-                'message_uz': "Joyingizni saqlab qolish uchun 15 daqiqa ichida to'lov qiling.",
-                'message_ru': 'Оплатите в течение 15 минут, чтобы сохранить место.',
-                'message_en': 'Pay within 15 minutes to secure your spot.'
-            }
         ]
         created_count = 0
         for data in seeds:
@@ -740,7 +722,7 @@ class AdminStatsView(APIView):
                 'title_en': oly.title_en,
                 'registered': reg_count,
                 'max': oly.max_participants,
-                'fill': round((reg_count / oly.max_participants * 100), 1) if oly.max_participants > 0 else 0,
+                'fill': round((reg_count / oly.max_participants * 100), 1) if oly.max_participants and oly.max_participants > 0 else 0,
                 'type': oly.olympiad_type
             })
 
@@ -775,45 +757,41 @@ class ResultAnalysisView(APIView):
 
     def get(self, request, olympiad_id):
         olympiad = get_object_or_404(Olympiad, id=olympiad_id)
-        sub_id = request.query_params.get('sub_id')
+        session_id = request.query_params.get('session_id')
         lang = request.query_params.get('lang', 'uz')
 
-        # ✅ Find the specific result
         query = ExamResult.objects.filter(user=request.user, olympiad=olympiad)
-        if sub_id:
-            query = query.filter(sub_olympiad_id=sub_id)
-        
+        if session_id:
+            query = query.filter(sub_olympiad_grade_id=session_id)
+
         my_result = query.first()
         if not my_result:
             return Response({'error': 'Result not found'}, status=404)
 
         if not my_result.completed_at or not my_result.start_time:
-             return Response({'error': 'Attempt data incomplete'}, status=400)
+            return Response({'error': 'Attempt data incomplete'}, status=400)
 
-        # ✅ Ranking needs to be per sub_olympiad if it exists
         rank_query = ExamResult.objects.filter(olympiad=olympiad, completed_at__isnull=False)
-        if my_result.sub_olympiad:
-             rank_query = rank_query.filter(sub_olympiad=my_result.sub_olympiad)
+        if my_result.sub_olympiad_grade:
+            rank_query = rank_query.filter(sub_olympiad_grade=my_result.sub_olympiad_grade)
         else:
-             rank_query = rank_query.filter(sub_olympiad__isnull=True)
+            rank_query = rank_query.filter(sub_olympiad_grade__isnull=True)
 
         my_duration = my_result.completed_at - my_result.start_time
-        from django.db.models import F, ExpressionWrapper, fields, Q
-        
+        from django.db.models import F, ExpressionWrapper, fields as db_fields, Q
         better_results = rank_query.annotate(
-            duration=ExpressionWrapper(F('completed_at') - F('start_time'), output_field=fields.DurationField())
+            duration=ExpressionWrapper(F('completed_at') - F('start_time'), output_field=db_fields.DurationField())
         ).filter(
-            Q(score__gt=my_result.score) | 
+            Q(score__gt=my_result.score) |
             Q(score=my_result.score, duration__lt=my_duration)
         ).count()
 
         rank = better_results + 1
         total_participants = rank_query.count()
 
-        # ✅ Get the correct test for questions
         test = None
-        if my_result.sub_olympiad:
-            test = getattr(my_result.sub_olympiad, 'test', None)
+        if my_result.sub_olympiad_grade:
+            test = getattr(my_result.sub_olympiad_grade, 'test', None)
         else:
             test = getattr(olympiad, 'test', None)
 
@@ -846,7 +824,7 @@ class ResultAnalysisView(APIView):
             })
 
         leaderboard = rank_query.annotate(
-            duration=ExpressionWrapper(F('completed_at') - F('start_time'), output_field=fields.DurationField())
+            duration=ExpressionWrapper(F('completed_at') - F('start_time'), output_field=db_fields.DurationField())
         ).order_by('-score', 'duration')[:10]
 
         leaderboard_data = [{
@@ -857,11 +835,13 @@ class ResultAnalysisView(APIView):
             'is_me': res.user == request.user
         } for i, res in enumerate(leaderboard)]
 
-        sub_title = my_result.sub_olympiad.get_translated('title', lang) if my_result.sub_olympiad else None
-        
+        session_title = None
+        if my_result.sub_olympiad_grade:
+            session_title = my_result.sub_olympiad_grade.sub_olympiad.get_translated('title', lang)
+
         return Response({
             'olympiad_title': olympiad.get_translated('title', lang),
-            'sub_title': sub_title,
+            'sub_title': session_title,
             'score': my_result.score,
             'completed_at': my_result.completed_at,
             'rank': rank,
@@ -881,30 +861,23 @@ class PersonalResultsListView(APIView):
     permission_classes = (permissions.IsAuthenticated,)
 
     def get(self, request):
-        # Allow admins to view results of any user for testing
         target_user = request.user
         user_id = request.query_params.get('user_id')
-        
+
         if user_id and request.user.is_staff:
             try:
-                from .models import User
                 target_user = User.objects.get(id=user_id)
             except User.DoesNotExist:
                 return Response({"error": "User not found"}, status=404)
 
-        # ✅ Get results only for completed olympiads (or items where admin allowed results)
         results = ExamResult.objects.filter(
-            user=target_user, 
+            user=target_user,
             completed_at__isnull=False
-        ).select_related('olympiad', 'sub_olympiad')
-        
+        ).select_related('olympiad', 'sub_olympiad_grade', 'sub_olympiad_grade__sub_olympiad')
+
         lang = request.query_params.get('lang', 'uz')
         data = []
         for res in results:
-            # AUTO-SHOW logic:
-            # 1. If olympiad is 'online' or free, show immediately
-            # 2. If olympiad is 'offline', wait for is_completed (admin signal)
-            
             is_visible = False
             if res.olympiad:
                 if res.olympiad.olympiad_type == 'online' or res.olympiad.is_free:
@@ -912,23 +885,29 @@ class PersonalResultsListView(APIView):
                 elif res.olympiad.is_completed:
                     is_visible = True
             else:
-                # Orphaned result but has a user and completion time - show it
                 is_visible = True
 
             if not is_visible:
-                 continue
+                continue
+
+            session_title = None
+            session_id = None
+            if res.sub_olympiad_grade:
+                session_title = res.sub_olympiad_grade.sub_olympiad.get_translated('title', lang)
+                session_id = res.sub_olympiad_grade.id
 
             data.append({
                 'id': res.id,
                 'olympiad_id': res.olympiad.id if res.olympiad else None,
                 'olympiad_title': res.olympiad.get_translated('title', lang) if res.olympiad else "Unknown Olympiad",
                 'olympiad_type': res.olympiad.olympiad_type if res.olympiad else 'online',
-                'sub_id': res.sub_olympiad.id if res.sub_olympiad else None,
-                'sub_olympiad_title': res.sub_olympiad.get_translated('title', lang) if res.sub_olympiad else None,
+                'session_id': session_id,
+                'sub_olympiad_title': session_title,
+                'grade': res.sub_olympiad_grade.grade if res.sub_olympiad_grade else None,
                 'score': res.score,
                 'completed_at': res.completed_at,
             })
-        
+
         return Response(data)
 
 
@@ -969,9 +948,7 @@ class SendNotificationView(APIView):
         notifs_to_create = [Notification(user=u, **data) for u in users_to_notify.distinct()]
         created_notifs = Notification.objects.bulk_create(notifs_to_create)
 
-        # Trigger manual broadcasts since bulk_create skips signals
         channel_layer = get_channel_layer()
-
         for notif in created_notifs:
             async_to_sync(channel_layer.group_send)(
                 f'user_{notif.user.id}',
@@ -990,3 +967,41 @@ class SendNotificationView(APIView):
             )
 
         return Response({'success': True, 'count': len(created_notifs)})
+
+
+class AllResultsListView(APIView):
+    permission_classes = (permissions.IsAuthenticated,)
+
+    def get(self, request):
+        if request.user.role != User.Role.ADMIN and not request.user.is_superuser:
+            return Response({'error': 'Forbidden'}, status=403)
+
+        results = ExamResult.objects.filter(
+            completed_at__isnull=False
+        ).select_related('user', 'olympiad', 'sub_olympiad_grade', 'sub_olympiad_grade__sub_olympiad').order_by('-completed_at')
+
+        lang = request.query_params.get('lang', 'uz')
+        data = []
+        for res in results:
+            session_title = None
+            session_id = None
+            if res.sub_olympiad_grade:
+                session_title = res.sub_olympiad_grade.sub_olympiad.get_translated('title', lang)
+                session_id = res.sub_olympiad_grade.id
+
+            data.append({
+                'id': res.id,
+                'user_id': res.user.id,
+                'user_name': f'{res.user.last_name} {res.user.first_name}',
+                'participant_id': res.user.participant_id,
+                'olympiad_id': res.olympiad.id if res.olympiad else None,
+                'olympiad_title': res.olympiad.get_translated('title', lang) if res.olympiad else 'Unknown',
+                'session_id': session_id,
+                'sub_olympiad_title': session_title,
+                'grade': res.sub_olympiad_grade.grade if res.sub_olympiad_grade else None,
+                'score': res.score,
+                'completed_at': res.completed_at,
+                'time_spent': (res.completed_at - res.start_time).total_seconds() // 60 if res.completed_at and res.start_time else 0
+            })
+
+        return Response(data)

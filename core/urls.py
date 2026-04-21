@@ -9,12 +9,14 @@ from rest_framework_simplejwt.views import (
     TokenRefreshView,
 )
 from .views import (
-    OlympiadViewSet, SubOlympiadViewSet, RegisterForOlympiadView, 
-    ExamView, SubmitResultView, ResultAnalysisView, PersonalResultsListView,
-    RegisterView,LoginView,UserProfileView,
+    OlympiadViewSet, SubOlympiadViewSet, SubOlympiadGradeViewSet,
+    RegisterForOlympiadView,
+    ExamView, SubmitResultView, ResultAnalysisView, PersonalResultsListView, AllResultsListView,
+    RegisterView, LoginView, UserProfileView,
     TestViewSet, QuestionViewSet, UserViewSet,
     RegistrationViewSet, PaymeCallbackView, ClickCallbackView, GetPaymeLinkView,
-    NotificationViewSet, SeedNotificationsView, SendNotificationView, AdminStatsView, RegionViewSet
+    NotificationViewSet, SeedNotificationsView, SendNotificationView,
+    AdminStatsView, RegionViewSet
 )
 
 schema_view = get_schema_view(
@@ -31,6 +33,7 @@ schema_view = get_schema_view(
 router = DefaultRouter()
 router.register(r'olympiads', OlympiadViewSet)
 router.register(r'subs', SubOlympiadViewSet)
+router.register(r'grade-sessions', SubOlympiadGradeViewSet, basename='grade-sessions')
 router.register(r'tests', TestViewSet)
 router.register(r'questions', QuestionViewSet)
 router.register(r'users', UserViewSet, basename='users_list')
@@ -44,22 +47,31 @@ urlpatterns = [
     path('auth/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('auth/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('auth/profile/', UserProfileView.as_view(), name='profile'),
-    
+
     path('notifications/seed/', SeedNotificationsView.as_view(), name='notifications-seed'),
     path('notifications/send/', SendNotificationView.as_view(), name='notifications-send'),
     path('admin/stats/', AdminStatsView.as_view(), name='admin-stats'),
 
     path('', include(router.urls)),
+
+    # Olympiad registration
     path('olympiads/<int:pk>/register/', RegisterForOlympiadView.as_view(), name='olympiad-register'),
-    path('exams/<int:sub_olympiad_id>/questions/', ExamView.as_view(), name='exam-questions'),
-    path('exams/<int:sub_olympiad_id>/submit/', SubmitResultView.as_view(), name='exam-submit'),
+
+    # Exam endpoints — now uses grade-session id
+    path('exams/grade-session/<int:grade_session_id>/questions/', ExamView.as_view(), name='exam-questions'),
+    path('exams/grade-session/<int:grade_session_id>/submit/', SubmitResultView.as_view(), name='exam-submit'),
+
     path('exams/<int:olympiad_id>/analysis/', ResultAnalysisView.as_view(), name='exam-analysis'),
     path('exams/personal-results/', PersonalResultsListView.as_view(), name='personal-results'),
+    path('exams/all-results/', AllResultsListView.as_view(), name='all-results'),
 
+
+    # Payments
     path('payments/payme/', PaymeCallbackView.as_view(), name='payme-callback'),
     path('payments/click/', ClickCallbackView.as_view(), name='click-callback'),
     path('payments/payme/get-link/<int:registration_id>/', GetPaymeLinkView.as_view(), name='get-payme-link'),
 
+    # Swagger docs
     re_path(r'^docs(?P<format>\.json|\.yaml)$', schema_view.without_ui(cache_timeout=0), name='schema-json'),
     path('docs/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
     path('redoc/', schema_view.with_ui('redoc', cache_timeout=0), name='schema-redoc'),

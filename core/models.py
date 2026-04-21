@@ -13,7 +13,7 @@ class UserManager(BaseUserManager):
     def create_superuser(self, username, email=None, password=None, **extra_fields):
         extra_fields.setdefault('is_staff', True)
         extra_fields.setdefault('is_superuser', True)
-        extra_fields.setdefault('role', 'superadmin') # По умолчанию суперадмин
+        extra_fields.setdefault('role', 'superadmin')
 
         if extra_fields.get('is_staff') is not True:
             raise ValueError('Superuser must have is_staff=True.')
@@ -56,7 +56,7 @@ class User(AbstractUser):
     middle_name = models.CharField(max_length=150, null=True, blank=True)
     phone = models.CharField(max_length=20, db_index=True)
     birth_date = models.DateField(null=True, blank=True)
-    region = models.ForeignKey(Region, on_delete=models.SET_NULL, null=True, blank=True, related_name='users') 
+    region = models.ForeignKey(Region, on_delete=models.SET_NULL, null=True, blank=True, related_name='users')
     school = models.CharField(max_length=255)
     grade = models.CharField(max_length=5, null=True, blank=True)
     
@@ -69,21 +69,17 @@ class User(AbstractUser):
     objects = UserManager()
 
     def save(self, *args, **kwargs):
-        # Автоматически ставим флаг персонала для админов
         if self.role in [self.Role.ADMIN, self.Role.SUPERADMIN]:
             self.is_staff = True
             
         if not self.participant_id:
             import random
             while True:
-                # Генерируем 10 цифр как просил юзер
                 new_id = f"USR-{random.randint(1000000000, 9999999999)}"
                 if not User.objects.filter(participant_id=new_id).exists():
                     self.participant_id = new_id
                     break
         
-        # Всегда синхронизируем username с participant_id для уникальности
-        # Это позволяет заходить по ID и иметь несколько аккаунтов на один телефон
         if self.participant_id:
             self.username = self.participant_id
 
@@ -121,7 +117,7 @@ class Olympiad(models.Model):
         ONGOING = 'ongoing', 'Идет'
         COMPLETED = 'completed', 'Завершена'
 
-    # Списки для фильтрации (например, [5, 6, 7] или [1, 2, 3])
+    # Списки для фильтрации участников (например, [5, 6, 7] или [1, 2, 3])
     grades = models.JSONField(default=list, blank=True)
     region_ids = models.JSONField(default=list, blank=True)
     
@@ -131,45 +127,39 @@ class Olympiad(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return self.title_ru
+        return self.title_ru or ''
 
     class Meta:
         verbose_name = "Олимпиада"
         verbose_name_plural = "Олимпиады"
-        ordering = ['-start_datetime']
+        ordering = ['-created_at']
 
     def get_translated(self, field, lang):
         """Возвращает перевод или первый доступный язык"""
         val = getattr(self, f"{field}_{lang}", None)
         if val: return val
-        # Если на текущем языке нет, пробуем другие по очереди
         for l in ['uz', 'ru', 'en']:
             val = getattr(self, f"{field}_{l}", None)
             if val: return val
         return ""
 
-# ==================== СУБ-ОЛИМПИАДЫ (ПРЕДМЕТЫ) ====================
+# ==================== ПРЕДМЕТЫ ОЛИМПИАДЫ ====================
 class SubOlympiad(models.Model):
+    """Предмет (например: Математика, Английский язык) в рамках олимпиады."""
     olympiad = models.ForeignKey(Olympiad, on_delete=models.CASCADE, related_name='subs')
     title_ru = models.CharField(max_length=255, null=True, blank=True)
     title_uz = models.CharField(max_length=255, null=True, blank=True)
     title_en = models.CharField(max_length=255, null=True, blank=True)
     
-    start_datetime = models.DateTimeField(db_index=True)
-    duration_minutes = models.PositiveIntegerField(default=60)
-    
-    is_started = models.BooleanField(default=False, verbose_name="Запущена вручную")
-    is_completed = models.BooleanField(default=False, verbose_name="Завершена")
-    
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"{self.olympiad.title_ru} - {self.title_ru}"
+        return f"{self.olympiad.title_ru} — {self.title_ru}"
 
     class Meta:
-        verbose_name = "Суб-олимпиада"
-        verbose_name_plural = "Суб-олимпиады"
-        ordering = ['start_datetime']
+        verbose_name = "Предмет олимпиады"
+        verbose_name_plural = "Предметы олимпиады"
+        ordering = ['created_at']
 
     def get_translated(self, field, lang):
         val = getattr(self, f"{field}_{lang}", None)
@@ -179,14 +169,48 @@ class SubOlympiad(models.Model):
             if val: return val
         return ""
 
+# ==================== СЕССИИ ПРЕДМЕТОВ ПО КЛАССАМ ====================
+class SubOlympiadGrade(models.Model):
+    """
+    Сессия конкретного предмета для конкретного класса.
+    Пример: Математика → 5 класс (11:00), Математика → 8 класс (13:00).
+    Каждая сессия имеет свои: время начала, длительность, тест, и состояние запуска.
+    """
+    sub_olympiad = models.ForeignKey(SubOlympiad, on_delete=models.CASCADE, related_name='grade_sessions')
+    grade = models.CharField(max_length=10, db_index=True, verbose_name="Класс")
+    
+    start_datetime = models.DateTimeField(db_index=True, null=True, blank=True)
+    duration_minutes = models.PositiveIntegerField(default=60)
+    
+    is_started = models.BooleanField(default=False, verbose_name="Запущена")
+    is_completed = models.BooleanField(default=False, verbose_name="Завершена")
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('sub_olympiad', 'grade')
+        verbose_name = "Сессия предмета для класса"
+        verbose_name_plural = "Сессии предметов для классов"
+        ordering = ['grade']
+
+    def __str__(self):
+        return f"{self.sub_olympiad.title_ru} ({self.grade} класс)"
+
 # ==================== ТЕСТЫ И ВОПРОСЫ ====================
 class Test(models.Model):
+    """
+    Тест привязывается к SubOlympiadGrade (основной способ) или напрямую к Olympiad (простая олимпиада).
+    sub_olympiad оставлен для обратной совместимости.
+    """
     olympiad = models.OneToOneField(Olympiad, on_delete=models.CASCADE, related_name='test', null=True, blank=True)
     sub_olympiad = models.OneToOneField(SubOlympiad, on_delete=models.CASCADE, related_name='test', null=True, blank=True)
+    sub_olympiad_grade = models.OneToOneField(SubOlympiadGrade, on_delete=models.CASCADE, related_name='test', null=True, blank=True)
     title = models.CharField(max_length=255)
 
     def __str__(self):
-        target = self.olympiad or self.sub_olympiad
+        if self.sub_olympiad_grade:
+            return f"Test: {self.sub_olympiad_grade.sub_olympiad.title_ru} ({self.sub_olympiad_grade.grade} кл.)"
+        target = self.sub_olympiad or self.olympiad
         title = getattr(target, 'title_ru', 'Unknown') if target else 'Unknown'
         return f"Test for {title}"
 
@@ -210,7 +234,9 @@ class Question(models.Model):
 
     def __str__(self):
         test = self.test
-        target = test.olympiad or test.sub_olympiad
+        if test.sub_olympiad_grade:
+            return f"Q: {test.sub_olympiad_grade.sub_olympiad.title_ru} ({test.sub_olympiad_grade.grade} кл.)"
+        target = test.sub_olympiad or test.olympiad
         title = getattr(target, 'title_ru', 'Unknown') if target else 'Unknown'
         return f"Q in {title}"
 
@@ -232,7 +258,6 @@ class Registration(models.Model):
     
     transaction_id = models.CharField(max_length=100, null=True, blank=True)
 
-    # Данные учителя на момент регистрации
     teacher_name = models.CharField(max_length=255, null=True, blank=True)
     teacher_phone = models.CharField(max_length=20, null=True, blank=True)
 
@@ -248,7 +273,6 @@ class Registration(models.Model):
         from django.utils import timezone
         from datetime import timedelta
         if not self.payment_deadline and self.payment_status == self.PaymentStatus.PENDING:
-            # Используем registered_at как базовое время (или текущее)
             base_time = self.registered_at or timezone.now()
             self.payment_deadline = base_time + timedelta(minutes=15)
         super().save(*args, **kwargs)
@@ -274,6 +298,9 @@ class Registration(models.Model):
 class ExamResult(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='exam_results')
     olympiad = models.ForeignKey(Olympiad, on_delete=models.CASCADE, related_name='exam_results', null=True, blank=True)
+    # sub_olympiad_grade — основное поле для новой системы (класс+предмет)
+    sub_olympiad_grade = models.ForeignKey(SubOlympiadGrade, on_delete=models.CASCADE, related_name='exam_results', null=True, blank=True)
+    # sub_olympiad — оставлен для обратной совместимости
     sub_olympiad = models.ForeignKey(SubOlympiad, on_delete=models.CASCADE, related_name='exam_results', null=True, blank=True)
     
     score = models.PositiveIntegerField(null=True, blank=True)
@@ -286,10 +313,11 @@ class ExamResult(models.Model):
     class Meta:
         verbose_name = "Результат экзамена"
         verbose_name_plural = "Результаты экзаменов"
-        unique_together = ('user', 'olympiad', 'sub_olympiad')
+        unique_together = ('user', 'olympiad', 'sub_olympiad_grade')
 
     def __str__(self):
         return f"{self.user.username} - {self.score}%"
+
 class Notification(models.Model):
     class Type(models.TextChoices):
         INFO = 'info', 'Инфо'
