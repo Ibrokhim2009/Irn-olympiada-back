@@ -62,6 +62,7 @@ urlpatterns = [
     path('exams/grade-session/<int:grade_session_id>/submit/', SubmitResultView.as_view(), name='exam-submit'),
 
     path('exams/<int:olympiad_id>/analysis/', ResultAnalysisView.as_view(), name='exam-analysis'),
+    path('exams/grade-session/<int:grade_session_id>/analysis/', ResultAnalysisView.as_view(), name='grade-session-analysis'),
     path('exams/personal-results/', PersonalResultsListView.as_view(), name='personal-results'),
     path('exams/all-results/', AllResultsListView.as_view(), name='all-results'),
 

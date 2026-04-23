@@ -755,12 +755,23 @@ class AdminStatsView(APIView):
 class ResultAnalysisView(APIView):
     permission_classes = (permissions.IsAuthenticated,)
 
-    def get(self, request, olympiad_id):
-        olympiad = get_object_or_404(Olympiad, id=olympiad_id)
+    def get(self, request, olympiad_id=None, grade_session_id=None):
+        # We might receive olympiad_id from /exams/<id>/analysis/
+        # OR we might receive grade_session_id from /exams/grade-session/<id>/analysis/
+        
+        target_olympiad_id = olympiad_id
         session_id = request.query_params.get('session_id') or \
                      request.query_params.get('grade_session_id') or \
                      request.query_params.get('sub_olympiad_grade')
-        lang = request.query_params.get('lang', 'uz')
+        
+        # If we got grade_session_id from URL, use it as session_id
+        if grade_session_id:
+            session_id = grade_session_id
+            from .models import SubOlympiadGrade
+            gs = get_object_or_404(SubOlympiadGrade, id=grade_session_id)
+            target_olympiad_id = gs.sub_olympiad.olympiad_id
+            
+        olympiad = get_object_or_404(Olympiad, id=target_olympiad_id)
         
         query = ExamResult.objects.filter(user=request.user, olympiad=olympiad)
         if session_id:
@@ -768,10 +779,15 @@ class ResultAnalysisView(APIView):
             
         my_result = query.first()
         if not my_result:
-            return Response({'error': f'Result not found for olympiad {olympiad_id} and session {session_id}'}, status=404)
+            return Response({'error': f'Result not found for olympiad {target_olympiad_id} and session {session_id}'}, status=404)
             
         if not my_result.completed_at:
-            return Response({'error': 'Attempt not completed yet (completed_at is missing)'}, status=400)
+            if my_result.answers_json:
+                # Auto-fix: if they have answers, they must have finished
+                my_result.completed_at = timezone.now()
+                my_result.save()
+            else:
+                return Response({'error': 'Attempt not completed yet (completed_at is missing and no answers found)'}, status=400)
             
         if not my_result.start_time:
             # Fallback if start_time is missing for some reason
