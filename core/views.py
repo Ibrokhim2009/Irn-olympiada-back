@@ -777,7 +777,8 @@ class ResultAnalysisView(APIView):
         if session_id:
             query = query.filter(sub_olympiad_grade_id=session_id)
             
-        my_result = query.first()
+        # Prioritize completed results if multiple exist
+        my_result = query.order_by('-completed_at', '-id').first()
         if not my_result:
             return Response({'error': f'Result not found for olympiad {target_olympiad_id} and session {session_id}'}, status=404)
             
