@@ -782,12 +782,10 @@ class ResultAnalysisView(APIView):
             return Response({'error': f'Result not found for olympiad {target_olympiad_id} and session {session_id}'}, status=404)
             
         if not my_result.completed_at:
-            if my_result.answers_json:
-                # Auto-fix: if they have answers, they must have finished
-                my_result.completed_at = timezone.now()
-                my_result.save()
-            else:
+            if not my_result.answers_json:
                 return Response({'error': 'Attempt not completed yet (completed_at is missing and no answers found)'}, status=400)
+            # Proceed anyway if we have answers, but don't save to DB as requested
+            pass
             
         if not my_result.start_time:
             # Fallback if start_time is missing for some reason

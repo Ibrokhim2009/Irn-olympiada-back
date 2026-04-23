@@ -1,31 +1,16 @@
+
 import os
 import django
 
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'IRNolympiadBack.settings')
-try:
-    django.setup()
-except Exception as e:
-    print(f"Django setup failed: {e}")
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'src.settings')
+django.setup()
 
-from core.models import ExamResult, Olympiad, User
+from core.models import ExamResult, User
 
-print("\n=== SYSTEM DEBUG: RESULTS VISIBILITY ===")
-results = ExamResult.objects.all()
-if not results.exists():
-    print("NO RESULTS FOUND IN DATABASE AT ALL.")
-else:
-    for r in results:
-        status = "VISIBLE"
-        reason = ""
-        if not r.completed_at:
-            status = "HIDDEN"
-            reason += "[Not finished by user] "
-        if r.olympiad and not r.olympiad.is_completed:
-            status = "HIDDEN"
-            reason += "[Olympiad not 'Finished' by Admin] "
-            
-        print(f"ResultID: {r.id} | User: {r.user.username} (ID: {r.user.id}) | Score: {r.score} | Status: {status} | Reason: {reason}")
+user_id = 2
+user = User.objects.get(id=user_id)
+results = ExamResult.objects.filter(user=user)
 
-print("\n=== OLYMPIADS STATUS ===")
-for o in Olympiad.objects.all():
-    print(f"Oly: {o.title_ru} | is_completed: {o.is_completed}")
+print(f"Results for user {user.username} (ID: {user_id}):")
+for r in results:
+    print(f"ID: {r.id}, Olympiad: {r.olympiad_id}, Session: {r.sub_olympiad_grade_id}, Score: {r.score}, Completed: {r.completed_at}, AnswersLen: {len(str(r.answers_json)) if r.answers_json else 0}")
