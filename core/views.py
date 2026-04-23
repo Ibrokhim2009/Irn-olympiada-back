@@ -756,8 +756,7 @@ class ResultAnalysisView(APIView):
     permission_classes = (permissions.IsAuthenticated,)
 
     def get(self, request, olympiad_id=None, grade_session_id=None):
-        # We might receive olympiad_id from /exams/<id>/analysis/
-        # OR we might receive grade_session_id from /exams/grade-session/<id>/analysis/
+        lang = request.query_params.get('lang', 'ru')  # ADD THIS LINE FIRST
         
         target_olympiad_id = olympiad_id
         session_id = request.query_params.get('session_id') or \
