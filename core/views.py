@@ -757,19 +757,26 @@ class ResultAnalysisView(APIView):
 
     def get(self, request, olympiad_id):
         olympiad = get_object_or_404(Olympiad, id=olympiad_id)
-        session_id = request.query_params.get('session_id')
+        session_id = request.query_params.get('session_id') or \
+                     request.query_params.get('grade_session_id') or \
+                     request.query_params.get('sub_olympiad_grade')
         lang = request.query_params.get('lang', 'uz')
-
+        
         query = ExamResult.objects.filter(user=request.user, olympiad=olympiad)
         if session_id:
             query = query.filter(sub_olympiad_grade_id=session_id)
-
+            
         my_result = query.first()
         if not my_result:
-            return Response({'error': 'Result not found'}, status=404)
-
-        if not my_result.completed_at or not my_result.start_time:
-            return Response({'error': 'Attempt data incomplete'}, status=400)
+            return Response({'error': f'Result not found for olympiad {olympiad_id} and session {session_id}'}, status=404)
+            
+        if not my_result.completed_at:
+            return Response({'error': 'Attempt not completed yet (completed_at is missing)'}, status=400)
+            
+        if not my_result.start_time:
+            # Fallback if start_time is missing for some reason
+            my_result.start_time = my_result.completed_at - timezone.timedelta(minutes=olympiad.duration_minutes or 60)
+            my_result.save()
 
         rank_query = ExamResult.objects.filter(olympiad=olympiad, completed_at__isnull=False)
         if my_result.sub_olympiad_grade:
