@@ -756,13 +756,13 @@ class ResultAnalysisView(APIView):
     permission_classes = (permissions.IsAuthenticated,)
 
     def get(self, request, olympiad_id=None, grade_session_id=None):
-        lang = request.query_params.get('lang', 'ru')  # ADD THIS LINE FIRST
-        
+        lang = request.query_params.get('lang', 'ru')
         target_olympiad_id = olympiad_id
+        
         session_id = request.query_params.get('session_id') or \
                      request.query_params.get('grade_session_id') or \
                      request.query_params.get('sub_olympiad_grade')
-        
+
         # If we got grade_session_id from URL, use it as session_id
         if grade_session_id:
             session_id = grade_session_id
