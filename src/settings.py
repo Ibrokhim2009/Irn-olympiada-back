@@ -41,8 +41,9 @@ INSTALLED_APPS = [
 # ✅ PAYME SETTINGS
 PAYTECH_LICENSE_API_KEY = os.getenv('PAYTECH_LICENSE_API_KEY')
 PAYME_ID = os.getenv('PAYME_ID')
-PAYME_KEY = os.getenv('PAYME_TEST_KEY') if DEBUG else os.getenv('PAYME_KEY')
-PAYME_URL = "https://test.paycom.uz" if DEBUG else "https://checkout.paycom.uz"
+PAYME_KEY = os.getenv('PAYME_KEY')
+PAYME_TEST_KEY = os.getenv('PAYME_TEST_KEY')
+PAYME_URL = "https://checkout.paycom.uz"
 PAYME_ACCOUNT_FIELD = 'registration_id'
 PAYME_AMOUNT_FIELD = 'price'
 PAYME_ACCOUNT_MODEL = 'core.models.Registration'
