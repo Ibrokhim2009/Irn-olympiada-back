@@ -26,6 +26,11 @@ from .permissions import IsAdminUserOrReadOnly
 from .utils_payme import get_payme_link
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
+import re
+try:
+    import pdfplumber
+except ImportError:
+    pdfplumber = None
 
 
 class RegionViewSet(viewsets.ModelViewSet):
@@ -62,6 +67,46 @@ class TestViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(test)
         status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
         return Response(serializer.data, status=status_code)
+
+    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAdminUser])
+    def extract_pdf_text(self, request, pk=None):
+        """Extracts raw text from PDF for frontend parsing."""
+        if not pdfplumber:
+            return Response({'error': 'pdfplumber not installed. Run "pip install pdfplumber"'}, status=400)
+        
+        file = request.FILES.get('file')
+        if not file:
+            return Response({'error': 'No file uploaded'}, status=400)
+
+        try:
+            with pdfplumber.open(file) as pdf:
+                full_text = ""
+                for page in pdf.pages:
+                    full_text += page.extract_text() + "\n"
+            
+            return Response({'text': full_text})
+        except Exception as e:
+            return Response({'error': str(e)}, status=500)
+
+    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAdminUser])
+    def bulk_add_questions(self, request, pk=None):
+        """Adds multiple questions at once."""
+        test = self.get_object()
+        questions_data = request.data.get('questions', [])
+        
+        created_count = 0
+        for q in questions_data:
+            Question.objects.create(
+                test=test,
+                text_uz=q.get('text_uz', ''),
+                text_ru=q.get('text_ru', ''),
+                text_en=q.get('text_en', ''),
+                options=q.get('options', []),
+                correct_option=q.get('correct_option', 'A')
+            )
+            created_count += 1
+            
+        return Response({'success': True, 'count': created_count})
 
 
 class SubOlympiadViewSet(viewsets.ModelViewSet):
