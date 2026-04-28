@@ -82,7 +82,7 @@ class TestViewSet(viewsets.ModelViewSet):
             with pdfplumber.open(file) as pdf:
                 full_text = ""
                 for page in pdf.pages:
-                    full_text += page.extract_text() + "\n"
+                    full_text += (page.extract_text() or "") + "\n"
             
             return Response({'text': full_text})
         except Exception as e:
