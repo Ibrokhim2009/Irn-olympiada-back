@@ -98,6 +98,9 @@ class SubOlympiadGradeSerializer(serializers.ModelSerializer):
         fields = ('id', 'sub_olympiad', 'grade', 'start_datetime', 'duration_minutes',
                   'is_started', 'is_completed', 'test')
         read_only_fields = ('sub_olympiad',)
+        extra_kwargs = {
+            'id': {'read_only': False, 'required': False}
+        }
 
 
 class SubOlympiadSerializer(serializers.ModelSerializer):
@@ -109,7 +112,8 @@ class SubOlympiadSerializer(serializers.ModelSerializer):
         fields = ('id', 'olympiad', 'title', 'title_ru', 'title_uz', 'title_en',
                   'grade_sessions')
         extra_kwargs = {
-            'olympiad': {'required': False}
+            'olympiad': {'required': False},
+            'id': {'read_only': False, 'required': False}
         }
 
     def get_title(self, obj):
@@ -268,12 +272,44 @@ class OlympiadSerializer(serializers.ModelSerializer):
             setattr(instance, attr, value)
 
         if subs_data is not None:
-            instance.subs.all().delete()
+            # Smart update for subs
+            keep_subs = []
             for sub_data in subs_data:
                 grade_sessions_data = sub_data.pop('grade_sessions', [])
-                sub = SubOlympiad.objects.create(olympiad=instance, **sub_data)
+                sub_id = sub_data.get('id')
+                
+                if sub_id:
+                    # Update existing sub
+                    sub = SubOlympiad.objects.get(id=sub_id, olympiad=instance)
+                    for attr, value in sub_data.items():
+                        setattr(sub, attr, value)
+                    sub.save()
+                else:
+                    # Create new sub
+                    sub = SubOlympiad.objects.create(olympiad=instance, **sub_data)
+                
+                keep_subs.append(sub.id)
+
+                # Smart update for grade_sessions
+                keep_sessions = []
                 for gs_data in grade_sessions_data:
-                    SubOlympiadGrade.objects.create(sub_olympiad=sub, **gs_data)
+                    gs_id = gs_data.get('id')
+                    if gs_id:
+                        # Update existing session
+                        gs = SubOlympiadGrade.objects.get(id=gs_id, sub_olympiad=sub)
+                        for attr, value in gs_data.items():
+                            setattr(gs, attr, value)
+                        gs.save()
+                    else:
+                        # Create new session
+                        gs = SubOlympiadGrade.objects.create(sub_olympiad=sub, **gs_data)
+                    keep_sessions.append(gs.id)
+                
+                # Delete sessions not in keep_sessions
+                SubOlympiadGrade.objects.filter(sub_olympiad=sub).exclude(id__in=keep_sessions).delete()
+
+            # Delete subs not in keep_subs
+            SubOlympiad.objects.filter(olympiad=instance).exclude(id__in=keep_subs).delete()
 
         self._sync_olympiad_data(instance)
         instance.save()
