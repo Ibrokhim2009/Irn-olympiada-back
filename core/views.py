@@ -15,7 +15,7 @@ from .serializers import (
     RegisterSerializer, UserSerializer, LoginRequestSerializer,
     OlympiadSerializer, SubOlympiadSerializer, SubOlympiadGradeSerializer,
     QuestionSerializer, QuestionExamSerializer, RegistrationSerializer,
-    TestSerializer, NotificationSerializer, RegionSerializer
+    TestSerializer, NotificationSerializer, RegionSerializer, ExamResultSerializer
 )
 from .models import (
     User, Olympiad, SubOlympiad, SubOlympiadGrade,
@@ -1026,3 +1026,15 @@ class AllResultsListView(APIView):
             })
 
         return Response(data)
+
+
+class ExamResultViewSet(viewsets.ModelViewSet):
+    queryset = ExamResult.objects.all()
+    serializer_class = ExamResultSerializer
+    permission_classes = [permissions.IsAdminUser]
+
+    @action(detail=True, methods=['post'])
+    def reset(self, request, pk=None):
+        result = self.get_object()
+        result.delete()
+        return Response({'success': True, 'message': 'Result reset successfully'})
