@@ -649,7 +649,10 @@ class NotificationViewSet(viewsets.ModelViewSet):
     permission_classes = (permissions.IsAuthenticated,)
 
     def get_queryset(self):
-        return Notification.objects.filter(user=self.request.user)
+        user = self.request.user
+        if user.role in ['admin', 'superadmin'] or user.is_superuser:
+            return Notification.objects.all().order_by('-created_at')
+        return Notification.objects.filter(user=user).order_by('-created_at')
 
     @action(detail=True, methods=['post'])
     def mark_as_read(self, request, pk=None):
