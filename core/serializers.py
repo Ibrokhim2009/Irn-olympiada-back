@@ -356,7 +356,10 @@ class TicketReplySerializer(serializers.ModelSerializer):
         read_only_fields = ('user',)
 
     def get_user_full_name(self, obj):
-        return f"{obj.user.last_name} {obj.user.first_name}".strip() or obj.user.username
+        try:
+            return f"{obj.user.last_name} {obj.user.first_name}".strip() or obj.user.username
+        except:
+            return "User"
 
 class SupportTicketSerializer(serializers.ModelSerializer):
     replies = TicketReplySerializer(many=True, read_only=True)
@@ -369,7 +372,13 @@ class SupportTicketSerializer(serializers.ModelSerializer):
         read_only_fields = ('user', 'status')
 
     def get_user_full_name(self, obj):
-        return f"{obj.user.last_name} {obj.user.first_name}".strip() or obj.user.username
+        try:
+            return f"{obj.user.last_name} {obj.user.first_name}".strip() or obj.user.username
+        except:
+            return "User"
 
     def get_status_label(self, obj):
-        return obj.get_status_display()
+        try:
+            return obj.get_status_display()
+        except:
+            return obj.status
