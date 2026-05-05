@@ -1046,7 +1046,7 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        if user.role in ['admin', 'superadmin']:
+        if user.is_staff or user.is_superuser:
             return SupportTicket.objects.all()
         return SupportTicket.objects.filter(user=user)
 
@@ -1055,7 +1055,7 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
-        if request.user.role not in ['admin', 'superadmin'] and instance.user != request.user:
+        if not request.user.is_staff and instance.user != request.user:
             return Response({'error': 'You cannot delete this ticket'}, status=403)
         return super().destroy(request, *args, **kwargs)
 
@@ -1081,7 +1081,7 @@ class TicketReplyViewSet(viewsets.ModelViewSet):
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
-        if request.user.role not in ['admin', 'superadmin'] and instance.user != request.user:
+        if not request.user.is_staff and instance.user != request.user:
             return Response({'error': 'You cannot delete this reply'}, status=403)
         return super().destroy(request, *args, **kwargs)
 
