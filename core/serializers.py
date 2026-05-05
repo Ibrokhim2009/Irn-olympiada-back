@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from .models import (
+    User, Olympiad, SubOlympiad, SubOlympiadGrade,
     Question, Test, Registration, ExamResult,
     Notification, Region, UserAchievement,
     SupportTicket, TicketReply
