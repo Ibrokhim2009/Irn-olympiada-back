@@ -3,7 +3,7 @@ from django.contrib.auth.admin import UserAdmin
 from .models import (
     User, Olympiad, SubOlympiad, SubOlympiadGrade, 
     Test, Question, Registration, ExamResult, 
-    Notification, Region
+    Notification, Region, SupportTicket, TicketReply
 )
 
 @admin.register(User)
@@ -111,3 +111,13 @@ class ExamResultAdmin(admin.ModelAdmin):
     search_fields = ('user__username', 'user__first_name', 'user__last_name')
     readonly_fields = ('completed_at',)
 
+@admin.register(SupportTicket)
+class SupportTicketAdmin(admin.ModelAdmin):
+    list_display = ('id', 'user', 'subject', 'status', 'created_at')
+    list_filter = ('status', 'created_at')
+    search_fields = ('subject', 'message', 'user__username')
+
+@admin.register(TicketReply)
+class TicketReplyAdmin(admin.ModelAdmin):
+    list_display = ('id', 'ticket', 'user', 'created_at')
+    list_filter = ('created_at',)
