@@ -799,41 +799,6 @@ class ResultAnalysisView(APIView):
         else:
             rank_query = rank_query.filter(sub_olympiad_grade__isnull=True)
 
-        else:
-            rank_query = rank_query.filter(sub_olympiad_grade__isnull=True)
-
-    def get_queryset(self):
-        user = self.request.user
-        if user.role in ['admin', 'superadmin']:
-            return SupportTicket.objects.all()
-        return SupportTicket.objects.filter(user=user)
-
-    def perform_create(self, serializer):
-        serializer.save(user=self.request.user)
-
-    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAdminUser])
-    def resolve(self, request, pk=None):
-        ticket = self.get_object()
-        ticket.status = SupportTicket.Status.RESOLVED
-        ticket.save()
-        return Response({'status': 'Ticket resolved'})
-
-class TicketReplyViewSet(viewsets.ModelViewSet):
-    serializer_class = TicketReplySerializer
-    permission_classes = (permissions.IsAuthenticated,)
-
-    def get_queryset(self):
-        # Replies are fetched via SupportTicketSerializer, 
-        # but we add this for completeness/direct access if needed
-        return TicketReply.objects.all()
-
-    def perform_create(self, serializer):
-        serializer.save(user=self.request.user)
-        # Update ticket updated_at
-        ticket = serializer.validated_data.get('ticket')
-        if ticket:
-            ticket.save() # triggers auto_now updated_at
-
         my_duration = my_result.completed_at - my_result.start_time
         from django.db.models import F, ExpressionWrapper, fields as db_fields, Q
         better_results = rank_query.annotate(
