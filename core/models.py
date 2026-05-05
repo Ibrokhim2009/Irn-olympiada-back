@@ -371,3 +371,41 @@ class UserAchievement(models.Model):
 
     def __str__(self):
         return f"{self.user.username} - {self.type}"
+
+# ==================== ТЕХПОДДЕРЖКА (ТИКЕТЫ) ====================
+class SupportTicket(models.Model):
+    class Status(models.TextChoices):
+        OPEN = 'open', 'Открыт'
+        IN_PROGRESS = 'in_progress', 'В процессе'
+        RESOLVED = 'resolved', 'Решен'
+        CLOSED = 'closed', 'Закрыт'
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='support_tickets')
+    subject = models.CharField(max_length=255)
+    message = models.TextField()
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.OPEN)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Тикет техподдержки"
+        verbose_name_plural = "Тикеты техподдержки"
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.subject} ({self.user.username})"
+
+class TicketReply(models.Model):
+    ticket = models.ForeignKey(SupportTicket, on_delete=models.CASCADE, related_name='replies')
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    message = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Ответ на тикет"
+        verbose_name_plural = "Ответы на тикеты"
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f"Reply to {self.ticket.subject}"

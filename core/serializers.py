@@ -1,8 +1,8 @@
 from rest_framework import serializers
 from .models import (
-    User, Olympiad, SubOlympiad, SubOlympiadGrade,
     Question, Test, Registration, ExamResult,
-    Notification, Region, UserAchievement
+    Notification, Region, UserAchievement,
+    SupportTicket, TicketReply
 )
 import base64
 import uuid
@@ -344,3 +344,31 @@ class OlympiadSerializer(serializers.ModelSerializer):
         
         olympiad.grades = sorted(numeric_grades)
         Olympiad.objects.filter(pk=olympiad.pk).update(grades=olympiad.grades)
+
+class TicketReplySerializer(serializers.ModelSerializer):
+    user_full_name = serializers.SerializerMethodField()
+    user_role = serializers.ReadOnlyField(source='user.role')
+
+    class Meta:
+        model = TicketReply
+        fields = ('id', 'ticket', 'user', 'user_full_name', 'user_role', 'message', 'created_at')
+        read_only_fields = ('user',)
+
+    def get_user_full_name(self, obj):
+        return f"{obj.user.last_name} {obj.user.first_name}".strip() or obj.user.username
+
+class SupportTicketSerializer(serializers.ModelSerializer):
+    replies = TicketReplySerializer(many=True, read_only=True)
+    user_full_name = serializers.SerializerMethodField()
+    status_label = serializers.SerializerMethodField()
+
+    class Meta:
+        model = SupportTicket
+        fields = ('id', 'user', 'user_full_name', 'subject', 'message', 'status', 'status_label', 'replies', 'created_at', 'updated_at')
+        read_only_fields = ('user', 'status')
+
+    def get_user_full_name(self, obj):
+        return f"{obj.user.last_name} {obj.user.first_name}".strip() or obj.user.username
+
+    def get_status_label(self, obj):
+        return obj.get_status_display()

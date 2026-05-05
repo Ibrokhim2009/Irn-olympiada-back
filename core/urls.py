@@ -16,7 +16,8 @@ from .views import (
     TestViewSet, QuestionViewSet, UserViewSet,
     RegistrationViewSet, PaymeCallbackView, ClickCallbackView, GetPaymeLinkView,
     NotificationViewSet, SeedNotificationsView, SendNotificationView,
-    AdminStatsView, RegionViewSet, ExamResultViewSet
+    AdminStatsView, RegionViewSet, ExamResultViewSet,
+    SupportTicketViewSet, TicketReplyViewSet
 )
 
 schema_view = get_schema_view(
@@ -41,6 +42,8 @@ router.register(r'registrations', RegistrationViewSet, basename='user_registrati
 router.register(r'notifications', NotificationViewSet, basename='notifications')
 router.register(r'regions', RegionViewSet, basename='regions')
 router.register(r'results', ExamResultViewSet, basename='results')
+router.register(r'support/tickets', SupportTicketViewSet, basename='support-tickets')
+router.register(r'support/replies', TicketReplyViewSet, basename='support-replies')
 
 urlpatterns = [
     path('auth/register/', RegisterView.as_view(), name='register'),
