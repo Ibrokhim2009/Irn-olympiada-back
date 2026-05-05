@@ -649,10 +649,7 @@ class NotificationViewSet(viewsets.ModelViewSet):
     permission_classes = (permissions.IsAuthenticated,)
 
     def get_queryset(self):
-        user = self.request.user
-        if user.role in ['admin', 'superadmin'] or user.is_superuser:
-            return Notification.objects.all().order_by('-created_at')
-        return Notification.objects.filter(user=user).order_by('-created_at')
+        return Notification.objects.filter(user=self.request.user)
 
     @action(detail=True, methods=['post'])
     def mark_as_read(self, request, pk=None):
@@ -1040,4 +1037,4 @@ class ExamResultViewSet(viewsets.ModelViewSet):
     def reset(self, request, pk=None):
         result = self.get_object()
         result.delete()
-        return Response({'success': True, 'message': 'Result reset successfully'})
+        return Response({'success': True, 'message': 'Result reset successfully'})
