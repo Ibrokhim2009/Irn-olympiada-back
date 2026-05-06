@@ -1,3 +1,5 @@
+import hashlib
+import time
 from django.utils import timezone
 from django.core.cache import cache
 from rest_framework_simplejwt.tokens import AccessToken
@@ -10,10 +12,10 @@ class UserActivityMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
-        # If user is not yet authenticated (common in JWT-based APIs at middleware level)
-        # we try to manually identify them from the Authorization header
+        # Identify user
         user = request.user
         
+        # If user is not yet authenticated (common in JWT-based APIs at middleware level)
         if not user or user.is_anonymous:
             auth_header = request.META.get('HTTP_AUTHORIZATION', '')
             if auth_header.startswith('Bearer '):
@@ -25,15 +27,31 @@ class UserActivityMiddleware:
                 except Exception:
                     pass
 
+        now = timezone.now()
+        
         if user and user.is_authenticated:
-            now = timezone.now()
-            
-            # Use cache to throttle updates to once every 60 seconds (more frequent for testing)
+            # Registered User Tracking
             cache_key = f'last-act-v2-{user.id}'
             if not cache.get(cache_key):
-                # Update DB
                 User.objects.filter(id=user.id).update(last_activity=now)
-                # Set cache for 60 seconds
                 cache.set(cache_key, True, 60)
+        else:
+            # Anonymous Visitor Tracking
+            ip = request.META.get('REMOTE_ADDR', '0.0.0.0')
+            ua = request.META.get('HTTP_USER_AGENT', '')
+            visitor_id = hashlib.md5(f"{ip}-{ua}".encode()).hexdigest()
+            
+            # Use a short-lived cache key for throttling updates to the guest list
+            throttle_key = f'guest-throttle-{visitor_id}'
+            if not cache.get(throttle_key):
+                guests = cache.get('online_guests', {})
+                current_ts = time.time()
+                
+                # Cleanup old guests (older than 5 minutes) and add current
+                guests = {k: v for k, v in guests.items() if v > current_ts - 300}
+                guests[visitor_id] = current_ts
+                
+                cache.set('online_guests', guests, 600) # Persist guest list for 10 min
+                cache.set(throttle_key, True, 60) # Throttle this visitor for 60s
 
         return self.get_response(request)

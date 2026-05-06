@@ -750,10 +750,21 @@ class AdminStatsView(APIView):
             } for u in online_users_qs.order_by('-last_activity')[:10] # Show top 10
         ]
 
+        # Online Guests from Cache
+        from django.core.cache import cache
+        import time
+        guests = cache.get('online_guests', {})
+        current_ts = time.time()
+        # Ensure we only count recent ones in case cleanup hasn't happened
+        active_guests = {k: v for k, v in guests.items() if v > current_ts - 300}
+        online_guests_count = len(active_guests)
+
         return Response({
             'total_users': total_users,
             'total_participants': total_users,
             'online_users': online_users_count,
+            'online_guests': online_guests_count,
+            'total_online': online_users_count + online_guests_count,
             'online_users_list': online_users_list,
             'total_olympiads': total_olympiads,
             'online_oly': online_oly,
