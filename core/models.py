@@ -382,7 +382,7 @@ class SupportTicket(models.Model):
 
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='support_tickets')
     subject = models.CharField(max_length=255)
-    message = models.TextField()
+    message = models.TextField(null=True, blank=True)
     image = models.ImageField(upload_to='support/', null=True, blank=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.OPEN)
     
@@ -400,7 +400,7 @@ class SupportTicket(models.Model):
 class TicketReply(models.Model):
     ticket = models.ForeignKey(SupportTicket, on_delete=models.CASCADE, related_name='replies')
     user = models.ForeignKey(User, on_delete=models.CASCADE)
-    message = models.TextField()
+    message = models.TextField(null=True, blank=True)
     image = models.ImageField(upload_to='support/', null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 

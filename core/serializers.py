@@ -349,6 +349,7 @@ class OlympiadSerializer(serializers.ModelSerializer):
 class TicketReplySerializer(serializers.ModelSerializer):
     user_full_name = serializers.SerializerMethodField()
     user_role = serializers.ReadOnlyField(source='user.role')
+    message = serializers.CharField(required=False, allow_blank=True)
 
     class Meta:
         model = TicketReply
@@ -365,6 +366,7 @@ class SupportTicketSerializer(serializers.ModelSerializer):
     replies = TicketReplySerializer(many=True, read_only=True)
     user_full_name = serializers.SerializerMethodField()
     status_label = serializers.SerializerMethodField()
+    message = serializers.CharField(required=False, allow_blank=True)
 
     class Meta:
         model = SupportTicket
