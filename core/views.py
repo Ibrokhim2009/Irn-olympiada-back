@@ -739,12 +739,22 @@ class AdminStatsView(APIView):
 
         # Online users (active in last 5 minutes)
         five_mins_ago = timezone.now() - timezone.timedelta(minutes=5)
-        online_users = User.objects.filter(last_activity__gte=five_mins_ago).count()
+        online_users_qs = User.objects.filter(last_activity__gte=five_mins_ago)
+        online_users_count = online_users_qs.count()
+        online_users_list = [
+            {
+                'id': u.id,
+                'full_name': f"{u.last_name} {u.first_name}",
+                'participant_id': u.participant_id,
+                'last_activity': u.last_activity
+            } for u in online_users_qs.order_by('-last_activity')[:10] # Show top 10
+        ]
 
         return Response({
             'total_users': total_users,
             'total_participants': total_users,
-            'online_users': online_users,
+            'online_users': online_users_count,
+            'online_users_list': online_users_list,
             'total_olympiads': total_olympiads,
             'online_oly': online_oly,
             'offline_oly': offline_oly,
