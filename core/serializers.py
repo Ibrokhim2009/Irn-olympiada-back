@@ -365,13 +365,28 @@ class TicketReplySerializer(serializers.ModelSerializer):
 class SupportTicketSerializer(serializers.ModelSerializer):
     replies = TicketReplySerializer(many=True, read_only=True)
     user_full_name = serializers.SerializerMethodField()
+    user_participant_id = serializers.ReadOnlyField(source='user.participant_id')
+    user_phone = serializers.ReadOnlyField(source='user.phone')
     status_label = serializers.SerializerMethodField()
     message = serializers.CharField(required=False, allow_blank=True)
 
     class Meta:
         model = SupportTicket
-        fields = ('id', 'user', 'user_full_name', 'subject', 'message', 'image', 'status', 'status_label', 'replies', 'created_at', 'updated_at')
+        fields = (
+            'id', 'user', 'user_full_name', 'user_participant_id', 'user_phone', 
+            'subject', 'message', 'image', 'status', 'status_label', 
+            'replies', 'created_at', 'updated_at'
+        )
         read_only_fields = ('user', 'status')
+
+    def get_user_full_name(self, obj):
+        try:
+            return f"{obj.user.last_name} {obj.user.first_name}".strip() or obj.user.username
+        except:
+            return "User"
+
+    def get_status_label(self, obj):
+        return dict(SupportTicket.Status.choices).get(obj.status, obj.status)
 
     def get_user_full_name(self, obj):
         try:
