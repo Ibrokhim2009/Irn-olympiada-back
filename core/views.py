@@ -737,8 +737,14 @@ class AdminStatsView(APIView):
 
         trend_data = [{'month': t['month'].strftime('%b'), 'registrations': t['registrations']} for t in trend]
 
+        # Online users (active in last 5 minutes)
+        five_mins_ago = timezone.now() - timezone.timedelta(minutes=5)
+        online_users = User.objects.filter(last_activity__gte=five_mins_ago).count()
+
         return Response({
             'total_users': total_users,
+            'total_participants': total_users,
+            'online_users': online_users,
             'total_olympiads': total_olympiads,
             'online_oly': online_oly,
             'offline_oly': offline_oly,

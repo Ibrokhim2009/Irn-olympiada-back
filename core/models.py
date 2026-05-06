@@ -64,6 +64,8 @@ class User(AbstractUser):
 
     teacher_name = models.CharField(max_length=255, null=True, blank=True)
     teacher_phone = models.CharField(max_length=20, null=True, blank=True)
+    
+    last_activity = models.DateTimeField(null=True, blank=True, db_index=True)
 
     REQUIRED_FIELDS = ['phone', 'role', 'teacher_name', 'teacher_phone']
     objects = UserManager()
