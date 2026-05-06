@@ -352,7 +352,7 @@ class TicketReplySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = TicketReply
-        fields = ('id', 'ticket', 'user', 'user_full_name', 'user_role', 'message', 'created_at')
+        fields = ('id', 'ticket', 'user', 'user_full_name', 'user_role', 'message', 'image', 'created_at')
         read_only_fields = ('user',)
 
     def get_user_full_name(self, obj):
@@ -368,7 +368,7 @@ class SupportTicketSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = SupportTicket
-        fields = ('id', 'user', 'user_full_name', 'subject', 'message', 'status', 'status_label', 'replies', 'created_at', 'updated_at')
+        fields = ('id', 'user', 'user_full_name', 'subject', 'message', 'image', 'status', 'status_label', 'replies', 'created_at', 'updated_at')
         read_only_fields = ('user', 'status')
 
     def get_user_full_name(self, obj):
