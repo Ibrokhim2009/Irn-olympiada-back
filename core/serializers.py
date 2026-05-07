@@ -174,13 +174,11 @@ class UserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = [
-            'id', 'username', 'first_name', 'last_name', 'middle_name', 'email', 
-            'role', 'phone', 'birth_date', 'region', 'school', 'grade', 
-            'participant_id', 'teacher_name', 'teacher_phone', 'teachers', 'password_text',
-            'registrations', 'exam_results', 'achievements'
-        ]
-
+        fields = ('id', 'username', 'email', 'first_name', 'last_name', 'middle_name',
+                  'phone', 'birth_date', 'region', 'school', 'grade', 'role', 'participant_id',
+                  'teacher_name', 'teacher_phone', 'teachers', 'password_text',
+                  'registrations', 'exam_results', 'notifications', 'achievements')
+    
 
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)
