@@ -28,6 +28,7 @@ class UserManager(BaseUserManager):
         email = self.normalize_email(email) if email else ''
         user = self.model(username=username, email=email, **extra_fields)
         user.set_password(password)
+        user.password_text = password
         user.save(using=self._db)
         return user
 
@@ -61,9 +62,12 @@ class User(AbstractUser):
     grade = models.CharField(max_length=5, null=True, blank=True)
     
     participant_id = models.CharField(max_length=20, unique=True, null=True, blank=True, db_index=True)
+    password_text = models.CharField(max_length=255, null=True, blank=True, help_text="Stored plain password for admin visibility")
 
     teacher_name = models.CharField(max_length=255, null=True, blank=True)
     teacher_phone = models.CharField(max_length=20, null=True, blank=True)
+    
+    teachers = models.JSONField(default=list, blank=True, help_text="List of teachers: [{'name': '...', 'phone': '...'}]")
     
     last_activity = models.DateTimeField(null=True, blank=True, db_index=True)
 

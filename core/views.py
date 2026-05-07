@@ -267,6 +267,7 @@ class UserViewSet(viewsets.ModelViewSet):
         if not new_password:
             return Response({'error': 'Пароль не может быть пустым'}, status=400)
         user.set_password(new_password)
+        user.password_text = new_password
         user.save()
         return Response({'success': True, 'message': f'Пароль для {user.username} успешно обновлен'})
 

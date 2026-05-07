@@ -174,10 +174,12 @@ class UserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ('id', 'username', 'email', 'first_name', 'last_name', 'middle_name',
-                  'phone', 'birth_date', 'region', 'school', 'grade', 'role', 'participant_id',
-                  'teacher_name', 'teacher_phone',
-                  'registrations', 'exam_results', 'notifications', 'achievements')
+        fields = [
+            'id', 'username', 'first_name', 'last_name', 'middle_name', 'email', 
+            'role', 'phone', 'birth_date', 'region', 'school', 'grade', 
+            'participant_id', 'teacher_name', 'teacher_phone', 'teachers', 'password_text',
+            'registrations', 'exam_results', 'achievements'
+        ]
 
 
 class RegisterSerializer(serializers.ModelSerializer):
@@ -189,7 +191,7 @@ class RegisterSerializer(serializers.ModelSerializer):
         model = User
         fields = ('username', 'password', 'first_name', 'last_name', 'middle_name',
                   'phone', 'birth_date', 'region', 'school', 'grade', 'participant_id',
-                  'teacher_name', 'teacher_phone')
+                  'teacher_name', 'teacher_phone', 'teachers')
 
     def create(self, validated_data):
         if not validated_data.get('username'):
