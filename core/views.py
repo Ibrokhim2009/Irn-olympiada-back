@@ -499,14 +499,18 @@ class RegisterForOlympiadView(APIView):
         else:
             initial_status = Registration.PaymentStatus.PENDING
 
+        target_user = request.user
+        if request.user.role in ['admin', 'superadmin'] and request.data.get('user_id'):
+            target_user = generics.get_object_or_404(User, id=request.data.get('user_id'))
+
         registration, created = Registration.objects.get_or_create(
-            user=request.user,
+            user=target_user,
             olympiad=olympiad,
             defaults={
                 'payment_status': initial_status,
                 'price': olympiad.price,
-                'teacher_name': request.user.teacher_name,
-                'teacher_phone': request.user.teacher_phone,
+                'teacher_name': target_user.teacher_name,
+                'teacher_phone': target_user.teacher_phone,
             }
         )
 
