@@ -83,6 +83,33 @@ class SubOlympiadGradeViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAdminUser])
     def start_now(self, request, pk=None):
         session = self.get_object()
+        user_ids = request.data.get('user_ids', [])
+
+        if user_ids:
+            # Start only for specific users
+            users = User.objects.filter(id__in=user_ids)
+            notifs_to_create = []
+            for user in users:
+                ExamResult.objects.get_or_create(
+                    user=user,
+                    olympiad=session.sub_olympiad.olympiad,
+                    sub_olympiad_grade=session,
+                    defaults={'start_time': timezone.now()}
+                )
+                notifs_to_create.append(Notification(
+                    user=user,
+                    title_ru=f"Предмет {session.sub_olympiad.title_ru} доступен для вас!",
+                    title_uz=f"Fan {session.sub_olympiad.title_uz} siz uchun ochildi!",
+                    title_en=f"Subject {session.sub_olympiad.title_en} is available for you!",
+                    message_ru=f"Администратор открыл вам доступ к тесту {session.sub_olympiad.title_ru} ({session.grade} кл.).",
+                    message_uz=f"Admin sizga {session.sub_olympiad.title_uz} ({session.grade}-sinf) fanidan testga ruxsat berdi.",
+                    message_en=f"Admin has granted you access to the test for {session.sub_olympiad.title_en} (Grade {session.grade}).",
+                    type='success'
+                ))
+            
+            Notification.objects.bulk_create(notifs_to_create)
+            return Response({'status': f'Grade {session.grade} session started for {len(user_ids)} users'})
+
         session.is_started = True
         session.is_completed = False
         session.save()
@@ -538,7 +565,9 @@ class ExamView(APIView):
             return Response({'error': 'Оплата не подтверждена'}, status=status.HTTP_403_FORBIDDEN)
 
         if not session.is_started or session.is_completed:
-            return Response({'error': 'Тест ещё не начался или уже завершён'}, status=status.HTTP_403_FORBIDDEN)
+            # Allow individual access if result already exists
+            if not ExamResult.objects.filter(user=request.user, sub_olympiad_grade=session).exists():
+                return Response({'error': 'Тест ещё не начался или уже завершён'}, status=status.HTTP_403_FORBIDDEN)
 
         # Check if already completed
         existing_result = ExamResult.objects.filter(
