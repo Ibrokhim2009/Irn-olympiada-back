@@ -469,13 +469,15 @@ class RegisterForOlympiadView(APIView):
     @swagger_auto_schema(responses={201: RegistrationSerializer, 400: 'Ошибка'})
     def post(self, request, pk):
         olympiad = generics.get_object_or_404(Olympiad, pk=pk)
+        is_admin = request.user.role in ['admin', 'superadmin'] or request.user.is_staff or request.user.is_superuser
         now = timezone.now()
 
-        if olympiad.start_datetime and now >= olympiad.start_datetime:
-            return Response({"error": "Регистрация закрыта: олимпиада уже началась"}, status=400)
+        if not is_admin:
+            if olympiad.start_datetime and now >= olympiad.start_datetime:
+                return Response({"error": "Регистрация закрыта: олимпиада уже началась"}, status=400)
 
-        if olympiad.registration_end_date and now >= olympiad.registration_end_date:
-            return Response({"error": "Регистрация закрыта: время вышло"}, status=400)
+            if olympiad.registration_end_date and now >= olympiad.registration_end_date:
+                return Response({"error": "Регистрация закрыта: время вышло"}, status=400)
 
         Registration.objects.filter(
             olympiad=olympiad,
@@ -487,7 +489,7 @@ class RegisterForOlympiadView(APIView):
             payment_status__in=['paid', 'free', 'pending']
         ).count()
 
-        if olympiad.max_participants > 0 and reg_count >= olympiad.max_participants:
+        if not is_admin and olympiad.max_participants > 0 and reg_count >= olympiad.max_participants:
             if not Registration.objects.filter(
                 user=request.user, olympiad=olympiad,
                 payment_status__in=['paid', 'free', 'pending']
