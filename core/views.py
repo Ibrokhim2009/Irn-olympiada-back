@@ -168,6 +168,21 @@ class SubOlympiadGradeViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAdminUser])
     def finish_now(self, request, pk=None):
         session = self.get_object()
+        user_ids = request.data.get('user_ids', [])
+
+        if user_ids:
+            # Finish only for specific users — mark their exam results as completed
+            results = ExamResult.objects.filter(
+                sub_olympiad_grade=session,
+                user__id__in=user_ids,
+                completed_at__isnull=True
+            )
+            updated = results.update(
+                completed_at=timezone.now(),
+                score=0  # score=0 if not submitted normally; can be overridden
+            )
+            return Response({'status': f'Finished exam for {updated} user(s) in grade {session.grade} session'})
+
         session.is_started = False
         session.is_completed = True
         session.save()
