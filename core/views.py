@@ -289,7 +289,7 @@ from rest_framework.pagination import PageNumberPagination
 class UserPagination(PageNumberPagination):
     page_size = 20
     page_size_query_param = 'page_size'
-    max_page_size = 100
+    max_page_size = 5000
 
 
 class UserViewSet(viewsets.ModelViewSet):
@@ -1102,15 +1102,18 @@ class AllResultsListView(APIView):
 
 
 class ExamResultViewSet(viewsets.ModelViewSet):
-    queryset = ExamResult.objects.all()
+    queryset = ExamResult.objects.all().select_related('user', 'olympiad', 'sub_olympiad_grade')
     serializer_class = ExamResultSerializer
     permission_classes = [permissions.IsAdminUser]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['sub_olympiad_grade', 'user', 'olympiad']
 
     @action(detail=True, methods=['post'])
     def reset(self, request, pk=None):
         result = self.get_object()
         result.delete()
         return Response({'success': True, 'message': 'Result reset successfully'})
+
 
 class SupportTicketViewSet(viewsets.ModelViewSet):
     serializer_class = SupportTicketSerializer

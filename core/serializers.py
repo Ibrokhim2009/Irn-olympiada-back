@@ -128,8 +128,8 @@ class ExamResultSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ExamResult
-        fields = ('id', 'olympiad', 'sub_olympiad', 'sub_olympiad_grade',
-                  'sub_olympiad_grade_info', 'score', 'completed_at')
+        fields = ('id', 'user', 'olympiad', 'sub_olympiad', 'sub_olympiad_grade',
+                  'sub_olympiad_grade_info', 'score', 'start_time', 'completed_at')
 
     def get_sub_olympiad_grade_info(self, obj):
         if obj.sub_olympiad_grade:
