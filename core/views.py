@@ -1088,6 +1088,8 @@ class AllResultsListView(APIView):
                 'user_id': res.user.id,
                 'user_name': f'{res.user.last_name} {res.user.first_name}',
                 'participant_id': res.user.participant_id,
+                'region_name': getattr(res.user.region, f'name_{lang}', '-') if res.user.region else '-',
+                'school': res.user.school or '-',
                 'olympiad_id': res.olympiad.id if res.olympiad else None,
                 'olympiad_title': res.olympiad.get_translated('title', lang) if res.olympiad else 'Unknown',
                 'session_id': session_id,
