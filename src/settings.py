@@ -139,7 +139,7 @@ DATABASES = {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': 'olympiad_db',
         'USER': 'olympiad_user',
-        'PASSWORD': 'StrongPass123!',
+        'PASSWORD': os.environ.get('DB_PASSWORD', 'NewPass2024x'),
         'HOST': 'localhost',
         'PORT': '5432',
         'CONN_MAX_AGE': 60,
