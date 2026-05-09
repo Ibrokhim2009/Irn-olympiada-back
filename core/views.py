@@ -320,17 +320,28 @@ class RegistrationViewSet(viewsets.ModelViewSet):
     http_method_names = ['get', 'delete'] # Only allow GET and DELETE
 
     def get_queryset(self):
-        Registration.objects.filter(
-            user=self.request.user,
-            payment_status=Registration.PaymentStatus.PENDING,
-            payment_deadline__lt=timezone.now()
-        ).update(payment_status=Registration.PaymentStatus.EXPIRED)
-        return Registration.objects.filter(user=self.request.user).order_by('-registered_at')
+        user = self.request.user
+        # Cleanup expired registrations for current user if not admin
+        if not user.role in ['admin', 'superadmin'] and not user.is_staff:
+            Registration.objects.filter(
+                user=user,
+                payment_status=Registration.PaymentStatus.PENDING,
+                payment_deadline__lt=timezone.now()
+            ).update(payment_status=Registration.PaymentStatus.EXPIRED)
+            return Registration.objects.filter(user=user).order_by('-registered_at')
+        
+        # Admins see everything
+        return Registration.objects.all().order_by('-registered_at')
 
     def perform_destroy(self, instance):
-        if instance.payment_status not in [Registration.PaymentStatus.PENDING, Registration.PaymentStatus.EXPIRED]:
-            from rest_framework.exceptions import ValidationError
-            raise ValidationError("Нельзя отменить оплаченную регистрацию.")
+        user = self.request.user
+        is_admin = user.role in ['admin', 'superadmin'] or user.is_staff
+        
+        if not is_admin:
+            if instance.payment_status not in [Registration.PaymentStatus.PENDING, Registration.PaymentStatus.EXPIRED]:
+                from rest_framework.exceptions import ValidationError
+                raise ValidationError("Нельзя отменить оплаченную регистрацию.")
+        
         instance.delete()
 
 
