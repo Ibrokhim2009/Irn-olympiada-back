@@ -93,15 +93,38 @@ class TestSerializer(serializers.ModelSerializer):
 
 class SubOlympiadGradeSerializer(serializers.ModelSerializer):
     test = TestSerializer(read_only=True)
+    participants_count = serializers.SerializerMethodField()
+    ongoing_count = serializers.SerializerMethodField()
+    finished_count = serializers.SerializerMethodField()
 
     class Meta:
         model = SubOlympiadGrade
         fields = ('id', 'sub_olympiad', 'grade', 'start_datetime', 'duration_minutes',
-                  'is_started', 'is_completed', 'test')
+                  'is_started', 'is_completed', 'test', 
+                  'participants_count', 'ongoing_count', 'finished_count')
         read_only_fields = ('sub_olympiad',)
         extra_kwargs = {
             'id': {'read_only': False, 'required': False}
         }
+
+    def get_participants_count(self, obj):
+        # Users registered for the olympiad who are in this grade
+        return Registration.objects.filter(
+            olympiad=obj.sub_olympiad.olympiad,
+            user__grade=obj.grade
+        ).exclude(payment_status='expired').count()
+
+    def get_ongoing_count(self, obj):
+        return ExamResult.objects.filter(
+            sub_olympiad_grade=obj,
+            completed_at__isnull=True
+        ).count()
+
+    def get_finished_count(self, obj):
+        return ExamResult.objects.filter(
+            sub_olympiad_grade=obj,
+            completed_at__isnull=False
+        ).count()
 
 
 class SubOlympiadSerializer(serializers.ModelSerializer):
