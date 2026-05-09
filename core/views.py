@@ -1155,14 +1155,18 @@ class ExamResultViewSet(viewsets.ModelViewSet):
                     'text_uz': q.text_uz,
                     'text_en': q.text_en,
                     'options': q.options,
-                    'correct_option': q.correct_option,
-                    'image': q.image.url if q.image else None
+                    'correct_option': str(q.correct_option) if q.correct_option is not None else None,
+                    'image': request.build_absolute_uri(q.image.url) if q.image else None
                 })
+            
+            # Convert keys in answers to strings for consistency
+            user_answers = result.answers_json or {}
+            formatted_answers = {str(k): str(v) for k, v in user_answers.items()}
             
             return Response({
                 'id': result.id,
                 'user_name': f"{result.user.last_name} {result.user.first_name}",
-                'answers': result.answers_json or {},
+                'answers': formatted_answers,
                 'score': result.score,
                 'questions': questions
             })
@@ -1184,9 +1188,12 @@ class ExamResultViewSet(viewsets.ModelViewSet):
         if test:
             questions = test.questions.all()
             if questions.exists():
-                correct_count = sum(
-                    1 for q in questions if new_answers.get(str(q.id)) == q.correct_option
-                )
+                correct_count = 0
+                for q in questions:
+                    user_val = str(new_answers.get(str(q.id))) if new_answers.get(str(q.id)) is not None else None
+                    correct_val = str(q.correct_option) if q.correct_option is not None else None
+                    if user_val == correct_val:
+                        correct_count += 1
                 result.score = round((correct_count / questions.count()) * 100)
         
         result.save()
