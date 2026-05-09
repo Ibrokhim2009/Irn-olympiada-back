@@ -1133,6 +1133,65 @@ class ExamResultViewSet(viewsets.ModelViewSet):
         result.delete()
         return Response({'success': True, 'message': 'Result reset successfully'})
 
+    @action(detail=True, methods=['get', 'post'], permission_classes=[permissions.IsAdminUser])
+    def edit_answers(self, request, pk=None):
+        result = self.get_object()
+        
+        if request.method == 'GET':
+            test = None
+            if result.sub_olympiad_grade:
+                test = getattr(result.sub_olympiad_grade, 'test', None)
+            else:
+                test = getattr(result.olympiad, 'test', None)
+            
+            if not test:
+                return Response({'error': 'Test not found'}, status=404)
+            
+            questions = []
+            for q in test.questions.all().order_by('id'):
+                questions.append({
+                    'id': q.id,
+                    'text_ru': q.text_ru,
+                    'text_uz': q.text_uz,
+                    'text_en': q.text_en,
+                    'options': q.options,
+                    'correct_option': q.correct_option,
+                    'image': q.image.url if q.image else None
+                })
+            
+            return Response({
+                'id': result.id,
+                'user_name': f"{result.user.last_name} {result.user.first_name}",
+                'answers': result.answers_json or {},
+                'score': result.score,
+                'questions': questions
+            })
+
+        # POST method
+        new_answers = request.data.get('answers')
+        if new_answers is None:
+            return Response({'error': 'Answers are required'}, status=400)
+            
+        result.answers_json = new_answers
+        
+        # Recalculate score
+        test = None
+        if result.sub_olympiad_grade:
+            test = getattr(result.sub_olympiad_grade, 'test', None)
+        else:
+            test = getattr(result.olympiad, 'test', None)
+            
+        if test:
+            questions = test.questions.all()
+            if questions.exists():
+                correct_count = sum(
+                    1 for q in questions if new_answers.get(str(q.id)) == q.correct_option
+                )
+                result.score = round((correct_count / questions.count()) * 100)
+        
+        result.save()
+        return Response({'success': True, 'score': result.score})
+
 
 class SupportTicketViewSet(viewsets.ModelViewSet):
     serializer_class = SupportTicketSerializer
