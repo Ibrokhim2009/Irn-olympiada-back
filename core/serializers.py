@@ -345,15 +345,16 @@ class OlympiadSerializer(serializers.ModelSerializer):
         """Пересчитывает start_datetime и список классов (grades) по сессиям."""
         from django.db.models import Min
         
-        # 1. Start datetime sync
-        earliest = SubOlympiadGrade.objects.filter(
-            sub_olympiad__olympiad=olympiad,
-            start_datetime__isnull=False
-        ).aggregate(Min('start_datetime'))['start_datetime__min']
+        # 1. Start datetime sync - ONLY set if empty, ensuring custom dates are never overwritten after editing
+        if not olympiad.start_datetime:
+            earliest = SubOlympiadGrade.objects.filter(
+                sub_olympiad__olympiad=olympiad,
+                start_datetime__isnull=False
+            ).aggregate(Min('start_datetime'))['start_datetime__min']
 
-        if earliest:
-            Olympiad.objects.filter(pk=olympiad.pk).update(start_datetime=earliest)
-            olympiad.start_datetime = earliest
+            if earliest:
+                Olympiad.objects.filter(pk=olympiad.pk).update(start_datetime=earliest)
+                olympiad.start_datetime = earliest
 
         # 2. Grades sync (NEW)
         all_grades = SubOlympiadGrade.objects.filter(
