@@ -22,7 +22,8 @@ class RegistrationSerializer(serializers.ModelSerializer):
         model = Registration
         fields = ('id', 'olympiad', 'olympiad_title', 'olympiad_type', 'price',
                   'registered_at', 'payment_status', 'status_label', 'transaction_id',
-                  'teacher_name', 'teacher_phone', 'expires_at', 'seconds_left')
+                  'teacher_name', 'teacher_phone', 'expires_at', 'seconds_left',
+                  'unique_participant_id')
 
     def get_status_label(self, obj):
         return obj.get_payment_status_display()
@@ -242,6 +243,7 @@ class OlympiadSerializer(serializers.ModelSerializer):
                   'start_datetime', 'duration_minutes', 'max_participants', 'registration_end_date',
                   'is_active', 'is_started', 'is_completed', 'seats_remaining', 'is_registered',
                   'registered_count', 'grades', 'region_ids', 'test', 'subs',
+                  'generate_unique_id', 'unique_id_prefix',
                   'title_ru', 'title_uz', 'title_en', 'description_ru', 'description_uz', 'description_en')
 
     def get_registered_count(self, obj):

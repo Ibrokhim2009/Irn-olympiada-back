@@ -130,6 +130,9 @@ class Olympiad(models.Model):
     is_started = models.BooleanField(default=False, verbose_name="Запущена вручную")
     is_completed = models.BooleanField(default=False, verbose_name="Завершена")
     
+    generate_unique_id = models.BooleanField(default=False, verbose_name="Генерировать уникальный ID участника")
+    unique_id_prefix = models.CharField(max_length=20, null=True, blank=True, verbose_name="Префикс уникального ID")
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -266,6 +269,8 @@ class Registration(models.Model):
 
     teacher_name = models.CharField(max_length=255, null=True, blank=True)
     teacher_phone = models.CharField(max_length=20, null=True, blank=True)
+    
+    unique_participant_id = models.CharField(max_length=50, null=True, blank=True, unique=True, db_index=True, verbose_name="Уникальный ID участника для этой олимпиады")
 
     class Meta:
         verbose_name = "Регистрация"
@@ -278,9 +283,22 @@ class Registration(models.Model):
     def save(self, *args, **kwargs):
         from django.utils import timezone
         from datetime import timedelta
+        import random
+        
         if not self.payment_deadline and self.payment_status == self.PaymentStatus.PENDING:
             base_time = self.registered_at or timezone.now()
             self.payment_deadline = base_time + timedelta(minutes=15)
+            
+        if self.olympiad.generate_unique_id and not self.unique_participant_id:
+            is_paid_or_free = self.payment_status in [self.PaymentStatus.PAID, self.PaymentStatus.FREE] or self.olympiad.olympiad_type == 'online'
+            if is_paid_or_free:
+                prefix = (self.olympiad.unique_id_prefix or "OLY").strip()
+                while True:
+                    new_id = f"{prefix}-{random.randint(100000, 999999)}"
+                    if not Registration.objects.filter(unique_participant_id=new_id).exists():
+                        self.unique_participant_id = new_id
+                        break
+
         super().save(*args, **kwargs)
 
     @property
