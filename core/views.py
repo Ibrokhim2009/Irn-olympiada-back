@@ -299,7 +299,7 @@ class UserViewSet(viewsets.ModelViewSet):
     pagination_class = UserPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['region', 'grade', 'registrations__olympiad']
-    search_fields = ['username', 'first_name', 'last_name', 'middle_name', 'phone', 'participant_id']
+    search_fields = ['username', 'first_name', 'last_name', 'middle_name', 'phone', 'participant_id', 'registrations__unique_participant_id']
     ordering_fields = ['date_joined', 'first_name', 'last_name']
 
     @action(detail=True, methods=['post'])
