@@ -371,6 +371,25 @@ class OlympiadSerializer(serializers.ModelSerializer):
         olympiad.grades = sorted(numeric_grades)
         Olympiad.objects.filter(pk=olympiad.pk).update(grades=olympiad.grades)
 
+        # 3. Auto-populate unique participant IDs for existing registrations if enabled
+        if getattr(olympiad, 'generate_unique_id', False):
+            import random
+            from django.db.models import Q
+            eligible_regs = Registration.objects.filter(
+                Q(unique_participant_id__isnull=True) | Q(unique_participant_id=''),
+                olympiad=olympiad
+            )
+            prefix = (getattr(olympiad, 'unique_id_prefix', '') or "OLY").strip()
+            for reg in eligible_regs:
+                is_paid_or_free = reg.payment_status in ['paid', 'free'] or olympiad.olympiad_type == 'online'
+                if is_paid_or_free:
+                    while True:
+                        new_id = f"{prefix}-{random.randint(100000, 999999)}"
+                        if not Registration.objects.filter(unique_participant_id=new_id).exists():
+                            reg.unique_participant_id = new_id
+                            reg.save(update_fields=['unique_participant_id'])
+                            break
+
 class TicketReplySerializer(serializers.ModelSerializer):
     user_full_name = serializers.SerializerMethodField()
     user_role = serializers.ReadOnlyField(source='user.role')
