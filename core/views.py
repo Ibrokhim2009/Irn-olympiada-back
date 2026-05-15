@@ -317,7 +317,14 @@ class UserViewSet(viewsets.ModelViewSet):
 class RegistrationViewSet(viewsets.ModelViewSet):
     serializer_class = RegistrationSerializer
     permission_classes = (permissions.IsAuthenticated,)
-    http_method_names = ['get', 'delete'] # Only allow GET and DELETE
+    http_method_names = ['get', 'delete', 'patch', 'put']
+
+    def perform_update(self, serializer):
+        user = self.request.user
+        if not (user.role in ['admin', 'superadmin'] or user.is_staff):
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("Only administrators can update registration data.")
+        serializer.save()
 
     def get_queryset(self):
         user = self.request.user
