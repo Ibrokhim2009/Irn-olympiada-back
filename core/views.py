@@ -1264,7 +1264,7 @@ class SMSTemplateView(APIView):
 
     def post(self, request):
         text = request.data.get('text')
-        name = request.data.get('name', f"Template_{timezone.now().strftime('%Y%m%d_%H%M%S')}")
+        name = request.data.get('name', f"Tpl_{timezone.now().timestamp()}")
         if not text:
             return Response({'error': 'Text is required'}, status=400)
         

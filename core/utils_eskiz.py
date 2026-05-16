@@ -90,8 +90,13 @@ def add_template(name, text):
     
     try:
         response = requests.post(url, data=payload, headers=headers)
-        print(f"Eskiz add template response: {response.text}")
-        return response.json()
+        try:
+            return response.json()
+        except Exception:
+            return {
+                "status": "error", 
+                "message": f"Eskiz API Error: {response.status_code}",
+                "raw_response": response.text[:100]
+            }
     except Exception as e:
-        print(f"Eskiz add template error: {e}")
         return {"status": "error", "message": str(e)}
