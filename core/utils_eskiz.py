@@ -68,6 +68,7 @@ def get_templates():
     
     try:
         response = requests.get(url, headers=headers)
+        print(f"Eskiz get templates status: {response.status_code}")
         data = response.json()
         return data if isinstance(data, list) else data.get('data', [])
     except Exception as e:
@@ -90,6 +91,7 @@ def add_template(name, text):
     
     try:
         response = requests.post(url, data=payload, headers=headers)
+        print(f"Eskiz add template status: {response.status_code}")
         try:
             return response.json()
         except Exception:
