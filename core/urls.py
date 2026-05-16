@@ -17,7 +17,8 @@ from .views import (
     RegistrationViewSet, PaymeCallbackView, ClickCallbackView, GetPaymeLinkView,
     NotificationViewSet, SeedNotificationsView, SendNotificationView,
     AdminStatsView, RegionViewSet, ExamResultViewSet,
-    SupportTicketViewSet, TicketReplyViewSet
+    SupportTicketViewSet, TicketReplyViewSet,
+    SMSTemplateView, SMSSendView
 )
 
 schema_view = get_schema_view(
@@ -75,6 +76,10 @@ urlpatterns = [
     path('payments/payme/', PaymeCallbackView.as_view(), name='payme-callback'),
     path('payments/click/', ClickCallbackView.as_view(), name='click-callback'),
     path('payments/payme/get-link/<int:registration_id>/', GetPaymeLinkView.as_view(), name='get-payme-link'),
+    
+    # SMS
+    path('sms/templates/', SMSTemplateView.as_view(), name='sms-templates'),
+    path('sms/send/', SMSSendView.as_view(), name='sms-send'),
 
     # Swagger docs
     re_path(r'^docs(?P<format>\.json|\.yaml)$', schema_view.without_ui(cache_timeout=0), name='schema-json'),

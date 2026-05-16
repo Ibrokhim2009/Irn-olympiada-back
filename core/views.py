@@ -1252,3 +1252,46 @@ class TicketReplyViewSet(viewsets.ModelViewSet):
             return Response({'error': 'You cannot delete this reply'}, status=403)
         return super().destroy(request, *args, **kwargs)
 
+
+from .utils_eskiz import get_templates, add_template, send_sms
+
+class SMSTemplateView(APIView):
+    permission_classes = (permissions.IsAdminUser,)
+
+    def get(self, request):
+        templates = get_templates()
+        return Response(templates)
+
+    def post(self, request):
+        text = request.data.get('text')
+        name = request.data.get('name', f"Template_{timezone.now().strftime('%Y%m%d_%H%M%S')}")
+        if not text:
+            return Response({'error': 'Text is required'}, status=400)
+        
+        result = add_template(name, text)
+        return Response(result)
+
+class SMSSendView(APIView):
+    permission_classes = (permissions.IsAdminUser,)
+
+    def post(self, request):
+        user_ids = request.data.get('user_ids', [])
+        message = request.data.get('message')
+        
+        if not user_ids or not message:
+            return Response({'error': 'Users and message are required'}, status=400)
+        
+        users = User.objects.filter(id__in=user_ids)
+        results = []
+        
+        for user in users:
+            if user.phone:
+                res = send_sms(user.phone, message)
+                results.append({
+                    'user_id': user.id,
+                    'phone': user.phone,
+                    'result': res
+                })
+        
+        return Response({'results': results})
+
