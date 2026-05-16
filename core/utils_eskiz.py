@@ -69,7 +69,7 @@ def get_templates():
     
     try:
         response = requests.get(url, headers=headers)
-        print(f"Eskiz get templates status ({url}): {response.status_code}")
+        print(f"Eskiz get templates response: {response.text}")
         data = response.json()
         return data if isinstance(data, list) else data.get('data', [])
     except Exception as e:
