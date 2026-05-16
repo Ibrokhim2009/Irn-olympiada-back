@@ -52,8 +52,10 @@ def send_sms(mobile_phone, message, from_name="4546"):
     
     try:
         response = requests.post(url, data=payload, headers=headers)
+        print(f"Eskiz send SMS response to {phone}: {response.text}")
         return response.json()
     except Exception as e:
+        print(f"Eskiz send SMS error: {e}")
         return {"status": "error", "message": str(e)}
 
 def get_templates():
