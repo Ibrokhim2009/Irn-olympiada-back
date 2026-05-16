@@ -22,7 +22,7 @@ from django.conf.urls.static import static
 from core.views import PaymeCallbackView
 
 urlpatterns = [
-    path('admin/', admin.site.urls),
+    path('django-admin/', admin.site.urls),
     path('api/', include('core.urls')),
     path('payment/payme/', PaymeCallbackView.as_view(), name='payme-callback-root'),
 ]
