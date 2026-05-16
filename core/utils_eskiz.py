@@ -61,14 +61,15 @@ def get_templates():
     if not token:
         return []
     
-    url = f"{ESKIZ_BASE_URL}message/sms/template"
+    # Trying the simplified template endpoint
+    url = f"{ESKIZ_BASE_URL}template"
     headers = {
         'Authorization': f'Bearer {token}'
     }
     
     try:
         response = requests.get(url, headers=headers)
-        print(f"Eskiz get templates status: {response.status_code}")
+        print(f"Eskiz get templates status ({url}): {response.status_code}")
         data = response.json()
         return data if isinstance(data, list) else data.get('data', [])
     except Exception as e:
@@ -80,7 +81,8 @@ def add_template(name, text):
     if not token:
         return {"status": "error", "message": "No token"}
     
-    url = f"{ESKIZ_BASE_URL}message/sms/template"
+    # Trying the simplified template endpoint
+    url = f"{ESKIZ_BASE_URL}template"
     payload = {
         'name': name,
         'text': text
@@ -91,7 +93,7 @@ def add_template(name, text):
     
     try:
         response = requests.post(url, data=payload, headers=headers)
-        print(f"Eskiz add template status: {response.status_code}")
+        print(f"Eskiz add template status ({url}): {response.status_code}")
         try:
             return response.json()
         except Exception:
