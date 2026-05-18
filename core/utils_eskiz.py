@@ -1,5 +1,6 @@
 import requests
 import os
+import datetime
 from django.core.cache import cache
 from environs import Env
 
@@ -63,36 +64,74 @@ def get_templates():
     if not token:
         return []
     
-    # 1. Try standard endpoint
-    # 2. Try 'message/sms/template'
-    # 3. Try 'user/template'
-    endpoints = ["template", "message/sms/template", "user/template"]
+    # Checked and verified endpoints from Postman Documentation:
+    # 1. 'user/templates' is the official list endpoint.
+    # 2. 'user/template' (fallback)
+    # 3. 'template' (fallback)
+    # 4. 'message/sms/template' (fallback)
+    endpoints = ["user/templates", "user/template", "template", "message/sms/template"]
     headers = { 'Authorization': f'Bearer {token}' }
     
     all_templates = []
+    now_iso = datetime.datetime.utcnow().isoformat() + 'Z'
     
-    # Always include the 3 Test Templates if in test status
     test_templates = [
-        {"id": "test_1", "text": "Это тест от Eskiz", "status": "approved", "name": "Test 1 (RU)"},
-        {"id": "test_2", "text": "Bu Eskiz dan test", "status": "approved", "name": "Test 2 (UZ)"},
-        {"id": "test_3", "text": "This is test from Eskiz", "status": "approved", "name": "Test 3 (EN)"},
+        {"id": "test_1", "text": "Это тест от Eskiz", "status": "approved", "name": "Test 1 (RU)", "created_at": now_iso},
+        {"id": "test_2", "text": "Bu Eskiz dan test", "status": "approved", "name": "Test 2 (UZ)", "created_at": now_iso},
+        {"id": "test_3", "text": "This is test from Eskiz", "status": "approved", "name": "Test 3 (EN)", "created_at": now_iso},
     ]
     
     for ep in endpoints:
         try:
             url = f"{ESKIZ_BASE_URL}{ep}"
             response = requests.get(url, headers=headers)
+            print(f"Eskiz GET {ep} status code: {response.status_code}")
             if response.status_code == 200:
                 data = response.json()
-                templates = data if isinstance(data, list) else data.get('data', [])
-                if isinstance(templates, list) and len(templates) > 0:
-                    all_templates.extend(templates)
-                    break # Found them!
-        except Exception:
+                print(f"Eskiz GET {ep} response: {data}")
+                
+                templates_list = []
+                if isinstance(data, list):
+                    templates_list = data
+                elif isinstance(data, dict):
+                    # API returns template lists in either 'result', 'data', or the top-level list
+                    templates_list = data.get('result', data.get('data', []))
+                
+                if isinstance(templates_list, list) and len(templates_list) > 0:
+                    for t in templates_list:
+                        if isinstance(t, dict):
+                            t_id = t.get('id')
+                            # 'template' or 'original_text' contains the SMS content
+                            t_text = t.get('template') or t.get('original_text') or t.get('text')
+                            t_status = t.get('status', 'moderation')
+                            
+                            # Normalize statuses to: approved, moderation, process, rejected
+                            if t_status in ['service', 'reklama', 'approved']:
+                                norm_status = 'approved'
+                            elif t_status in ['inproccess', 'process']:
+                                norm_status = 'process'
+                            elif t_status in ['rejected', 'declined']:
+                                norm_status = 'rejected'
+                            else:
+                                norm_status = 'moderation'
+                                
+                            t_created = t.get('created_at') or t.get('created_date') or t.get('updated_at') or now_iso
+                            t_note = t.get('note', '')
+                            
+                            all_templates.append({
+                                'id': t_id,
+                                'text': t_text,
+                                'status': norm_status,
+                                'created_at': t_created,
+                                'note': t_note
+                            })
+                    break # Stop trying other endpoints if we got a valid non-empty list
+        except Exception as e:
+            print(f"Error fetching from {ep}: {e}")
             continue
             
-    # Combine with test templates (remove duplicates if any)
-    unique_texts = set(t['text'] for t in all_templates)
+    # Combine with test templates ensuring no duplicates by text
+    unique_texts = set(t['text'] for t in all_templates if t.get('text'))
     for tt in test_templates:
         if tt['text'] not in unique_texts:
             all_templates.append(tt)
@@ -104,20 +143,38 @@ def add_template(name, text):
     if not token:
         return {"status": "error", "message": "No token"}
     
-    url = f"{ESKIZ_BASE_URL}template"
-    payload = { 'name': name, 'text': text }
+    # Official POST endpoint from Postman documentation: 'user/template'
+    url = f"{ESKIZ_BASE_URL}user/template"
+    # Payload key MUST be 'template', not 'text' or 'name'
+    payload = { 'template': text }
     headers = { 'Authorization': f'Bearer {token}' }
     
     try:
         response = requests.post(url, data=payload, headers=headers)
-        # If /template fails, try /message/sms/template
+        print(f"Eskiz POST user/template status code: {response.status_code}")
+        print(f"Eskiz POST user/template response text: {response.text}")
+        
+        # Fallback to other endpoints if the main one fails with 404
         if response.status_code == 404:
-            url = f"{ESKIZ_BASE_URL}message/sms/template"
-            response = requests.post(url, data=payload, headers=headers)
+            url = f"{ESKIZ_BASE_URL}template"
+            response = requests.post(url, data={'name': name, 'text': text}, headers=headers)
             
-        try:
-            return response.json()
-        except Exception:
-            return {"status": "error", "message": f"Eskiz API Error: {response.status_code}"}
+        if response.status_code in [200, 201]:
+            try:
+                return response.json()
+            except Exception:
+                return {"status": "success", "message": "Template created successfully"}
+        else:
+            try:
+                data = response.json()
+                return {
+                    "status": "error",
+                    "message": data.get('message', f"Eskiz API Error: {response.status_code}")
+                }
+            except Exception:
+                return {
+                    "status": "error",
+                    "message": f"Eskiz API Error: {response.status_code}"
+                }
     except Exception as e:
         return {"status": "error", "message": str(e)}
