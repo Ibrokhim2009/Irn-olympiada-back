@@ -1281,7 +1281,7 @@ class TicketReplyViewSet(viewsets.ModelViewSet):
         return super().destroy(request, *args, **kwargs)
 
 
-from .utils_eskiz import get_templates, add_template, send_sms, delete_template
+from .utils_eskiz import get_templates, add_template, send_sms, delete_template, get_balance
 
 class SMSTemplateView(APIView):
     permission_classes = (permissions.IsAdminUser,)
@@ -1333,3 +1333,12 @@ class SMSSendView(APIView):
         
         return Response({'results': results})
 
+
+class SMSBalanceView(APIView):
+    permission_classes = (permissions.IsAdminUser,)
+
+    def get(self, request):
+        result = get_balance()
+        if result.get('status') == 'error':
+            return Response({'error': result.get('message')}, status=503)
+        return Response({'balance': result['balance']})

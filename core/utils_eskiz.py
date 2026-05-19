@@ -198,3 +198,55 @@ def delete_template(template_id):
                 }
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+
+def get_balance():
+    """
+    Fetches the current SMS account balance from the Eskiz gateway.
+    Tries multiple known endpoints for balance/user info.
+    Returns a dict with 'balance' (float) or 'error' (str).
+    """
+    token = get_eskiz_token()
+    if not token:
+        return {"status": "error", "message": "Failed to get Eskiz token"}
+
+    headers = {'Authorization': f'Bearer {token}'}
+
+    # Eskiz documents 'user/get-limit' as the balance/limit endpoint
+    endpoints_to_try = [
+        "user/get-limit",
+        "auth/user",
+        "user",
+    ]
+
+    for ep in endpoints_to_try:
+        try:
+            url = f"{ESKIZ_BASE_URL}{ep}"
+            response = requests.get(url, headers=headers)
+            print(f"Eskiz GET {ep} status: {response.status_code}, body: {response.text[:300]}")
+
+            if response.status_code == 200:
+                data = response.json()
+
+                # Try to extract balance from various response shapes
+                balance = None
+
+                # Shape: {"status":"success","data":{"balance":"1234.56"}}
+                inner = data.get('data') or data
+                if isinstance(inner, dict):
+                    bal = inner.get('balance') or inner.get('sms_count') or inner.get('limit')
+                    if bal is not None:
+                        try:
+                            balance = float(bal)
+                        except (ValueError, TypeError):
+                            pass
+
+                if balance is not None:
+                    return {"status": "success", "balance": balance}
+
+        except Exception as e:
+            print(f"Eskiz get_balance error for {ep}: {e}")
+            continue
+
+    return {"status": "error", "message": "Could not retrieve balance from Eskiz API"}
+
