@@ -1253,7 +1253,7 @@ class TicketReplyViewSet(viewsets.ModelViewSet):
         return super().destroy(request, *args, **kwargs)
 
 
-from .utils_eskiz import get_templates, add_template, send_sms
+from .utils_eskiz import get_templates, add_template, send_sms, delete_template
 
 class SMSTemplateView(APIView):
     permission_classes = (permissions.IsAdminUser,)
@@ -1269,6 +1269,16 @@ class SMSTemplateView(APIView):
             return Response({'error': 'Text is required'}, status=400)
         
         result = add_template(name, text)
+        return Response(result)
+
+    def delete(self, request):
+        template_id = request.query_params.get('id') or request.data.get('id')
+        if not template_id:
+            return Response({'error': 'Template ID is required'}, status=400)
+        
+        result = delete_template(template_id)
+        if result.get('status') == 'error':
+            return Response({'error': result.get('message')}, status=400)
         return Response(result)
 
 class SMSSendView(APIView):

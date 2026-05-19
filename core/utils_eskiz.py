@@ -75,11 +75,8 @@ def get_templates():
     all_templates = []
     now_iso = datetime.datetime.utcnow().isoformat() + 'Z'
     
-    test_templates = [
-        {"id": "test_1", "text": "Это тест от Eskiz", "status": "approved", "name": "Test 1 (RU)", "created_at": now_iso},
-        {"id": "test_2", "text": "Bu Eskiz dan test", "status": "approved", "name": "Test 2 (UZ)", "created_at": now_iso},
-        {"id": "test_3", "text": "This is test from Eskiz", "status": "approved", "name": "Test 3 (EN)", "created_at": now_iso},
-    ]
+    all_templates = []
+    now_iso = datetime.datetime.utcnow().isoformat() + 'Z'
     
     for ep in endpoints:
         try:
@@ -130,12 +127,6 @@ def get_templates():
             print(f"Error fetching from {ep}: {e}")
             continue
             
-    # Combine with test templates ensuring no duplicates by text
-    unique_texts = set(t['text'] for t in all_templates if t.get('text'))
-    for tt in test_templates:
-        if tt['text'] not in unique_texts:
-            all_templates.append(tt)
-            
     return all_templates
 
 def add_template(name, text):
@@ -164,6 +155,35 @@ def add_template(name, text):
                 return response.json()
             except Exception:
                 return {"status": "success", "message": "Template created successfully"}
+        else:
+            try:
+                data = response.json()
+                return {
+                    "status": "error",
+                    "message": data.get('message', f"Eskiz API Error: {response.status_code}")
+                }
+            except Exception:
+                return {
+                    "status": "error",
+                    "message": f"Eskiz API Error: {response.status_code}"
+                }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+def delete_template(template_id):
+    token = get_eskiz_token()
+    if not token:
+        return {"status": "error", "message": "No token"}
+    
+    url = f"{ESKIZ_BASE_URL}user/template/{template_id}"
+    headers = { 'Authorization': f'Bearer {token}' }
+    
+    try:
+        response = requests.delete(url, headers=headers)
+        print(f"Eskiz DELETE user/template/{template_id} status code: {response.status_code}")
+        print(f"Eskiz DELETE user/template/{template_id} response: {response.text}")
+        if response.status_code in [200, 201]:
+            return {"status": "success", "message": "Template deleted successfully"}
         else:
             try:
                 data = response.json()
