@@ -293,14 +293,42 @@ class UserPagination(PageNumberPagination):
 
 
 class UserViewSet(viewsets.ModelViewSet):
-    queryset = User.objects.filter(role=User.Role.PARTICIPANT).order_by('-date_joined')
     serializer_class = UserSerializer
     permission_classes = (permissions.IsAdminUser,)
     pagination_class = UserPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['region', 'grade', 'registrations__olympiad']
+    filterset_fields = []
     search_fields = ['username', 'first_name', 'last_name', 'middle_name', 'phone', 'participant_id', 'registrations__unique_participant_id']
     ordering_fields = ['date_joined', 'first_name', 'last_name']
+
+    def get_queryset(self):
+        queryset = User.objects.filter(role=User.Role.PARTICIPANT).order_by('-date_joined')
+        
+        regions = self.request.query_params.getlist('region') or self.request.query_params.getlist('region[]')
+        if not regions and 'region' in self.request.query_params:
+            regions = self.request.query_params.get('region').split(',')
+        if regions:
+            regions = [r.strip() for r in regions if r.strip()]
+            if regions:
+                queryset = queryset.filter(region__in=regions)
+
+        grades = self.request.query_params.getlist('grade') or self.request.query_params.getlist('grade[]')
+        if not grades and 'grade' in self.request.query_params:
+            grades = self.request.query_params.get('grade').split(',')
+        if grades:
+            grades = [g.strip() for g in grades if g.strip()]
+            if grades:
+                queryset = queryset.filter(grade__in=grades)
+
+        olympiads = self.request.query_params.getlist('registrations__olympiad') or self.request.query_params.getlist('registrations__olympiad[]')
+        if not olympiads and 'registrations__olympiad' in self.request.query_params:
+            olympiads = self.request.query_params.get('registrations__olympiad').split(',')
+        if olympiads:
+            olympiads = [o.strip() for o in olympiads if o.strip()]
+            if olympiads:
+                queryset = queryset.filter(registrations__olympiad__in=olympiads).distinct()
+
+        return queryset
 
     @action(detail=True, methods=['post'])
     def reset_password(self, request, pk=None):
