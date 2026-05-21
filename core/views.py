@@ -346,6 +346,20 @@ class UserViewSet(viewsets.ModelViewSet):
             if olympiads:
                 queryset = queryset.filter(registrations__olympiad__in=olympiads).distinct()
 
+        payment_status = self.request.query_params.get('payment_status')
+        if payment_status == 'paid':
+            queryset = queryset.filter(
+                models.Q(registrations__payment_status='paid') |
+                models.Q(registrations__olympiad__olympiad_type='online')
+            ).distinct()
+        elif payment_status == 'pending':
+            queryset = queryset.filter(registrations__payment_status='pending').distinct()
+        elif payment_status == 'not_paid':
+            queryset = queryset.filter(registrations__isnull=False).exclude(
+                models.Q(registrations__payment_status__in=['paid', 'pending']) |
+                models.Q(registrations__olympiad__olympiad_type='online')
+            ).distinct()
+
         return queryset
 
     @action(detail=False, methods=['get'], url_path='sms-stats')
@@ -365,21 +379,26 @@ class UserViewSet(viewsets.ModelViewSet):
         already_sent_user_ids_count = 0
         
         if template_id and total_unique_phones > 0:
-            # Get all phone numbers that have received this template
-            all_sent_phones = set(
-                User.objects.filter(sms_history__template_id=template_id)
-                .exclude(phone='')
-                .values_list('phone', flat=True)
-            )
-            # Intersection of sent phones with unique phones in the current filtered set
-            already_sent_phones_count = len(unique_phones_set.intersection(all_sent_phones))
-            
-            # Find how many users in our current queryset are in all_sent_user_ids
-            all_sent_user_ids = set(
-                SMSSentHistory.objects.filter(template_id=template_id).values_list('user_id', flat=True)
-            )
-            filtered_user_ids = set(queryset.values_list('id', flat=True))
-            already_sent_user_ids_count = len(filtered_user_ids.intersection(all_sent_user_ids))
+            try:
+                # Get all phone numbers that have received this template
+                all_sent_phones = set(
+                    User.objects.filter(sms_history__template_id=template_id)
+                    .exclude(phone='')
+                    .values_list('phone', flat=True)
+                )
+                # Intersection of sent phones with unique phones in the current filtered set
+                already_sent_phones_count = len(unique_phones_set.intersection(all_sent_phones))
+                
+                # Find how many users in our current queryset are in all_sent_user_ids
+                all_sent_user_ids = set(
+                    SMSSentHistory.objects.filter(template_id=template_id).values_list('user_id', flat=True)
+                )
+                filtered_user_ids = set(queryset.values_list('id', flat=True))
+                already_sent_user_ids_count = len(filtered_user_ids.intersection(all_sent_user_ids))
+            except Exception as e:
+                print(f"Error querying SMSSentHistory in sms_stats: {e}")
+                already_sent_phones_count = 0
+                already_sent_user_ids_count = 0
             
         return Response({
             'total_profiles': total_profiles,
@@ -1385,11 +1404,14 @@ class SMSSendView(APIView):
         already_sent_user_ids = set()
         already_sent_phones = set()
         if template_id:
-            already_sent_user_ids = set(
-                SMSSentHistory.objects.filter(template_id=template_id).values_list('user_id', flat=True)
-            )
-            raw_phones = User.objects.filter(sms_history__template_id=template_id).exclude(phone='').values_list('phone', flat=True)
-            already_sent_phones = set(p.strip() for p in raw_phones if p)
+            try:
+                already_sent_user_ids = set(
+                    SMSSentHistory.objects.filter(template_id=template_id).values_list('user_id', flat=True)
+                )
+                raw_phones = User.objects.filter(sms_history__template_id=template_id).exclude(phone='').values_list('phone', flat=True)
+                already_sent_phones = set(p.strip() for p in raw_phones if p)
+            except Exception as e:
+                print(f"Error querying SMSSentHistory in SMSSendView: {e}")
 
         history_to_create = []
         sent_in_this_batch = set()
@@ -1442,7 +1464,10 @@ class SMSSendView(APIView):
                     )
 
         if history_to_create:
-            SMSSentHistory.objects.bulk_create(history_to_create, ignore_conflicts=True)
+            try:
+                SMSSentHistory.objects.bulk_create(history_to_create, ignore_conflicts=True)
+            except Exception as e:
+                print(f"Error bulk_creating SMSSentHistory: {e}")
 
         return Response({'results': results})
 
@@ -1455,16 +1480,21 @@ class SMSSentHistoryView(APIView):
         if not template_id:
             return Response({'error': 'Template ID is required'}, status=400)
         
-        sent_user_ids = list(SMSSentHistory.objects.filter(template_id=template_id).values_list('user_id', flat=True))
-        
-        # Get phone numbers of users in sent history
-        sent_phones = list(
-            User.objects.filter(sms_history__template_id=template_id)
-            .exclude(phone='')
-            .values_list('phone', flat=True)
-        )
-        # Clean/trim phones and keep unique values
-        sent_phones = list(set(p.strip() for p in sent_phones if p))
+        try:
+            sent_user_ids = list(SMSSentHistory.objects.filter(template_id=template_id).values_list('user_id', flat=True))
+            
+            # Get phone numbers of users in sent history
+            sent_phones = list(
+                User.objects.filter(sms_history__template_id=template_id)
+                .exclude(phone='')
+                .values_list('phone', flat=True)
+            )
+            # Clean/trim phones and keep unique values
+            sent_phones = list(set(p.strip() for p in sent_phones if p))
+        except Exception as e:
+            print(f"Error querying SMSSentHistoryView: {e}")
+            sent_user_ids = []
+            sent_phones = []
         
         return Response({
             'user_ids': sent_user_ids,
