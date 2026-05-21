@@ -12,7 +12,7 @@ from drf_yasg import openapi
 from rest_framework import response
 from payme import Payme
 from .serializers import (  
-    RegisterSerializer, UserSerializer, LoginRequestSerializer,
+    RegisterSerializer, UserSerializer, UserListSerializer, LoginRequestSerializer,
     OlympiadSerializer, SubOlympiadSerializer, SubOlympiadGradeSerializer,
     QuestionSerializer, QuestionExamSerializer, RegistrationSerializer,
     TestSerializer, NotificationSerializer, RegionSerializer, ExamResultSerializer,
@@ -302,13 +302,25 @@ class UserViewSet(viewsets.ModelViewSet):
     search_fields = ['username', 'first_name', 'last_name', 'middle_name', 'phone', 'participant_id', 'registrations__unique_participant_id']
     ordering_fields = ['date_joined', 'first_name', 'last_name']
 
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return UserListSerializer
+        return self.serializer_class
+
     def get_queryset(self):
-        queryset = User.objects.filter(role=User.Role.PARTICIPANT).prefetch_related(
-            'registrations__olympiad',
-            'exam_results__sub_olympiad_grade__sub_olympiad',
-            'notifications',
-            'achievements'
-        ).order_by('-date_joined')
+        queryset = User.objects.filter(role=User.Role.PARTICIPANT)
+        if self.action in ['retrieve', 'update', 'partial_update']:
+            queryset = queryset.prefetch_related(
+                'registrations__olympiad',
+                'exam_results__sub_olympiad_grade__sub_olympiad',
+                'notifications',
+                'achievements'
+            )
+        elif self.action == 'list':
+            queryset = queryset.prefetch_related(
+                'registrations__olympiad'
+            )
+        queryset = queryset.order_by('-date_joined')
         
         regions = self.request.query_params.getlist('region') or self.request.query_params.getlist('region[]')
         if not regions and 'region' in self.request.query_params:
