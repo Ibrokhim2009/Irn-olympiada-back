@@ -290,7 +290,7 @@ from rest_framework.pagination import PageNumberPagination
 class UserPagination(PageNumberPagination):
     page_size = 20
     page_size_query_param = 'page_size'
-    max_page_size = 5000
+    max_page_size = 50000
 
 
 class UserViewSet(viewsets.ModelViewSet):
@@ -303,7 +303,12 @@ class UserViewSet(viewsets.ModelViewSet):
     ordering_fields = ['date_joined', 'first_name', 'last_name']
 
     def get_queryset(self):
-        queryset = User.objects.filter(role=User.Role.PARTICIPANT).order_by('-date_joined')
+        queryset = User.objects.filter(role=User.Role.PARTICIPANT).prefetch_related(
+            'registrations__olympiad',
+            'exam_results__sub_olympiad_grade__sub_olympiad',
+            'notifications',
+            'achievements'
+        ).order_by('-date_joined')
         
         regions = self.request.query_params.getlist('region') or self.request.query_params.getlist('region[]')
         if not regions and 'region' in self.request.query_params:
