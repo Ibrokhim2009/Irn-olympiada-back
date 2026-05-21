@@ -1214,20 +1214,160 @@ class SendNotificationView(APIView):
         return Response({'success': True, 'count': len(created_notifs)})
 
 
+class ResultsPagination(PageNumberPagination):
+    page_size = 20
+    page_size_query_param = 'page_size'
+    max_page_size = 50000
+
+
 class AllResultsListView(APIView):
     permission_classes = (permissions.IsAuthenticated,)
+    pagination_class = ResultsPagination
 
     def get(self, request):
         if request.user.role != User.Role.ADMIN and not request.user.is_superuser:
             return Response({'error': 'Forbidden'}, status=403)
 
-        results = ExamResult.objects.filter(
+        lang = request.query_params.get('lang', 'uz')
+
+        get_filters = request.query_params.get('get_filters') == 'true'
+        if get_filters:
+            completed_results = ExamResult.objects.filter(completed_at__isnull=False)
+
+            # Olympiads
+            oly_ids = completed_results.values_list('olympiad_id', flat=True).distinct()
+            olympiads = []
+            for o in Olympiad.objects.filter(id__in=oly_ids):
+                olympiads.append({
+                    'id': o.id,
+                    'title': o.get_translated('title', lang)
+                })
+
+            # Subjects (SubOlympiads)
+            sub_ids = completed_results.exclude(sub_olympiad_grade__isnull=True).values_list('sub_olympiad_grade__sub_olympiad_id', flat=True).distinct()
+            sub_ids_compat = completed_results.exclude(sub_olympiad__isnull=True).values_list('sub_olympiad_id', flat=True).distinct()
+            all_sub_ids = list(set(sub_ids) | set(sub_ids_compat))
+            
+            subjects = []
+            seen_sub_titles = set()
+            for sub in SubOlympiad.objects.filter(id__in=all_sub_ids):
+                title = sub.get_translated('title', lang)
+                if title and title not in seen_sub_titles:
+                    subjects.append(title)
+                    seen_sub_titles.add(title)
+
+            # Grades
+            grades = list(completed_results.exclude(sub_olympiad_grade__isnull=True).values_list('sub_olympiad_grade__grade', flat=True).distinct())
+            try:
+                grades.sort(key=int)
+            except ValueError:
+                grades.sort()
+
+            # Regions
+            region_ids = completed_results.exclude(user__region__isnull=True).values_list('user__region_id', flat=True).distinct()
+            regions = []
+            for r in Region.objects.filter(id__in=region_ids):
+                name = getattr(r, f'name_{lang}', None) or r.name_ru
+                if name:
+                    regions.append(name)
+            regions.sort()
+
+            return Response({
+                'olympiads': olympiads,
+                'subjects': subjects,
+                'grades': grades,
+                'regions': regions
+            })
+
+        queryset = ExamResult.objects.filter(
             completed_at__isnull=False
         ).select_related('user', 'olympiad', 'sub_olympiad_grade', 'sub_olympiad_grade__sub_olympiad').order_by('-completed_at')
 
-        lang = request.query_params.get('lang', 'uz')
+        # 1. Search (user name or participant_id)
+        search = request.query_params.get('search')
+        if search:
+            queryset = queryset.filter(
+                models.Q(user__first_name__icontains=search) |
+                models.Q(user__last_name__icontains=search) |
+                models.Q(user__middle_name__icontains=search) |
+                models.Q(user__participant_id__icontains=search)
+            )
+
+        # 2. Olympiad
+        olympiads = request.query_params.getlist('olympiad') or request.query_params.getlist('olympiad[]')
+        if not olympiads and 'olympiad' in request.query_params:
+            olympiads = request.query_params.get('olympiad').split(',')
+        if olympiads:
+            olympiads = [o.strip() for o in olympiads if o.strip()]
+            if olympiads:
+                queryset = queryset.filter(olympiad__id__in=olympiads)
+
+        # 3. Subject
+        subjects = request.query_params.getlist('subject') or request.query_params.getlist('subject[]')
+        if not subjects and 'subject' in request.query_params:
+            subjects = request.query_params.get('subject').split(',')
+        if subjects:
+            subjects = [s.strip() for s in subjects if s.strip()]
+            if subjects:
+                queryset = queryset.filter(
+                    models.Q(sub_olympiad_grade__sub_olympiad__title_ru__in=subjects) |
+                    models.Q(sub_olympiad_grade__sub_olympiad__title_uz__in=subjects) |
+                    models.Q(sub_olympiad_grade__sub_olympiad__title_en__in=subjects) |
+                    models.Q(sub_olympiad__title_ru__in=subjects) |
+                    models.Q(sub_olympiad__title_uz__in=subjects) |
+                    models.Q(sub_olympiad__title_en__in=subjects)
+                )
+
+        # 4. Grade
+        grades = request.query_params.getlist('grade') or request.query_params.getlist('grade[]')
+        if not grades and 'grade' in request.query_params:
+            grades = request.query_params.get('grade').split(',')
+        if grades:
+            grades = [g.strip() for g in grades if g.strip()]
+            if grades:
+                queryset = queryset.filter(sub_olympiad_grade__grade__in=grades)
+
+        # 5. Region
+        regions = request.query_params.getlist('region') or request.query_params.getlist('region[]')
+        if not regions and 'region' in request.query_params:
+            regions = request.query_params.get('region').split(',')
+        if regions:
+            regions = [r.strip() for r in regions if r.strip()]
+            if regions:
+                queryset = queryset.filter(
+                    models.Q(user__region__name_ru__in=regions) |
+                    models.Q(user__region__name_uz__in=regions) |
+                    models.Q(user__region__name_en__in=regions) |
+                    models.Q(user__region__id__in=[r for r in regions if r.isdigit()])
+                )
+
+        # 6. Sorting by score
+        score_sort = request.query_params.get('score_sort')
+        if score_sort == 'desc':
+            queryset = queryset.order_by('-score', '-completed_at')
+        elif score_sort == 'asc':
+            queryset = queryset.order_by('score', '-completed_at')
+        else:
+            queryset = queryset.order_by('-completed_at')
+
+        # Pagination
+        paginator = self.pagination_class()
+        page = paginator.paginate_queryset(queryset, request, view=self)
+
+        # Calculate stats for the entire filtered queryset
+        from django.db.models import Max, Avg
+        stats = queryset.aggregate(
+            top_score=Max('score'),
+            avg_score=Avg('score')
+        )
+        top_score = stats.get('top_score') or 0
+        avg_score = round(stats.get('avg_score') or 0)
+        total_count = queryset.count()
+
         data = []
-        for res in results:
+        target_queryset = page if page is not None else queryset
+
+        for res in target_queryset:
             session_title = None
             session_id = None
             if res.sub_olympiad_grade:
@@ -1251,6 +1391,15 @@ class AllResultsListView(APIView):
                 'time_spent': (res.completed_at - res.start_time).total_seconds() // 60 if res.completed_at and res.start_time else 0
             })
 
+        if page is not None:
+            return Response({
+                'count': total_count,
+                'next': paginator.get_next_link(),
+                'previous': paginator.get_previous_link(),
+                'top_score': top_score,
+                'avg_score': avg_score,
+                'results': data
+            })
         return Response(data)
 
 
