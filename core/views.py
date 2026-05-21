@@ -21,7 +21,8 @@ from .serializers import (
 from .models import (
     User, Olympiad, SubOlympiad, SubOlympiadGrade,
     Registration, ExamResult, Test, Question,
-    Notification, Region, SupportTicket, TicketReply
+    Notification, Region, SupportTicket, TicketReply,
+    SMSSentHistory
 )
 from .permissions import IsAdminUserOrReadOnly
 from .utils_payme import get_payme_link
@@ -329,6 +330,46 @@ class UserViewSet(viewsets.ModelViewSet):
                 queryset = queryset.filter(registrations__olympiad__in=olympiads).distinct()
 
         return queryset
+
+    @action(detail=False, methods=['get'], url_path='sms-stats')
+    def sms_stats(self, request):
+        queryset = self.filter_queryset(self.get_queryset())
+        total_profiles = queryset.count()
+        
+        template_id = request.query_params.get('template_id')
+        
+        # Get all phone numbers from the filtered queryset
+        phones = list(queryset.exclude(phone='').values_list('phone', flat=True))
+        
+        unique_phones_set = set(p.strip() for p in phones if p)
+        total_unique_phones = len(unique_phones_set)
+        
+        already_sent_phones_count = 0
+        already_sent_user_ids_count = 0
+        
+        if template_id and total_unique_phones > 0:
+            # Get all phone numbers that have received this template
+            all_sent_phones = set(
+                User.objects.filter(sms_history__template_id=template_id)
+                .exclude(phone='')
+                .values_list('phone', flat=True)
+            )
+            # Intersection of sent phones with unique phones in the current filtered set
+            already_sent_phones_count = len(unique_phones_set.intersection(all_sent_phones))
+            
+            # Find how many users in our current queryset are in all_sent_user_ids
+            all_sent_user_ids = set(
+                SMSSentHistory.objects.filter(template_id=template_id).values_list('user_id', flat=True)
+            )
+            filtered_user_ids = set(queryset.values_list('id', flat=True))
+            already_sent_user_ids_count = len(filtered_user_ids.intersection(all_sent_user_ids))
+            
+        return Response({
+            'total_profiles': total_profiles,
+            'total_unique_phones': total_unique_phones,
+            'already_sent_phones': already_sent_phones_count,
+            'already_sent_users': already_sent_user_ids_count,
+        })
 
     @action(detail=True, methods=['post'])
     def reset_password(self, request, pk=None):
@@ -1315,6 +1356,7 @@ class SMSSendView(APIView):
     def post(self, request):
         user_ids = request.data.get('user_ids', [])
         message = request.data.get('message')
+        template_id = request.data.get('template_id')
         
         if not user_ids or not message:
             return Response({'error': 'Users and message are required'}, status=400)
@@ -1322,6 +1364,7 @@ class SMSSendView(APIView):
         users = User.objects.filter(id__in=user_ids)
         results = []
         
+        history_to_create = []
         for user in users:
             if user.phone:
                 res = send_sms(user.phone, message)
@@ -1330,8 +1373,40 @@ class SMSSendView(APIView):
                     'phone': user.phone,
                     'result': res
                 })
+                if template_id and res.get('status') != 'error':
+                    history_to_create.append(
+                        SMSSentHistory(user=user, template_id=template_id)
+                    )
+        
+        if history_to_create:
+            SMSSentHistory.objects.bulk_create(history_to_create, ignore_conflicts=True)
         
         return Response({'results': results})
+
+
+class SMSSentHistoryView(APIView):
+    permission_classes = (permissions.IsAdminUser,)
+
+    def get(self, request):
+        template_id = request.query_params.get('template_id')
+        if not template_id:
+            return Response({'error': 'Template ID is required'}, status=400)
+        
+        sent_user_ids = list(SMSSentHistory.objects.filter(template_id=template_id).values_list('user_id', flat=True))
+        
+        # Get phone numbers of users in sent history
+        sent_phones = list(
+            User.objects.filter(sms_history__template_id=template_id)
+            .exclude(phone='')
+            .values_list('phone', flat=True)
+        )
+        # Clean/trim phones and keep unique values
+        sent_phones = list(set(p.strip() for p in sent_phones if p))
+        
+        return Response({
+            'user_ids': sent_user_ids,
+            'phones': sent_phones
+        })
 
 
 class SMSBalanceView(APIView):

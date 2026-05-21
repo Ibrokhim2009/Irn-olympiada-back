@@ -18,7 +18,7 @@ from .views import (
     NotificationViewSet, SeedNotificationsView, SendNotificationView,
     AdminStatsView, RegionViewSet, ExamResultViewSet,
     SupportTicketViewSet, TicketReplyViewSet,
-    SMSTemplateView, SMSSendView, SMSBalanceView
+    SMSTemplateView, SMSSendView, SMSBalanceView, SMSSentHistoryView
 )
 
 schema_view = get_schema_view(
@@ -81,6 +81,7 @@ urlpatterns = [
     path('sms/templates/', SMSTemplateView.as_view(), name='sms-templates'),
     path('sms/send/', SMSSendView.as_view(), name='sms-send'),
     path('sms/balance/', SMSBalanceView.as_view(), name='sms-balance'),
+    path('sms/sent-history/', SMSSentHistoryView.as_view(), name='sms-sent-history'),
 
     # Swagger docs
     re_path(r'^docs(?P<format>\.json|\.yaml)$', schema_view.without_ui(cache_timeout=0), name='schema-json'),

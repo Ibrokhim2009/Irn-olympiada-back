@@ -435,3 +435,18 @@ class TicketReply(models.Model):
 
     def __str__(self):
         return f"Reply to {self.ticket.subject}"
+
+
+class SMSSentHistory(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='sms_history')
+    template_id = models.CharField(max_length=100, db_index=True)
+    sent_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('user', 'template_id')
+        verbose_name = "История отправки СМС"
+        verbose_name_plural = "История отправки СМС"
+
+    def __str__(self):
+        return f"SMS to {self.user.username} (Template: {self.template_id})"
+
