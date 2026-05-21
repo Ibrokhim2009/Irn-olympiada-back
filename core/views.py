@@ -1361,26 +1361,72 @@ class SMSSendView(APIView):
         if not user_ids or not message:
             return Response({'error': 'Users and message are required'}, status=400)
         
-        users = User.objects.filter(id__in=user_ids)
+        users = list(User.objects.filter(id__in=user_ids))
         results = []
         
+        # 1. Fetch already sent users and phones for this template (if template_id is provided)
+        already_sent_user_ids = set()
+        already_sent_phones = set()
+        if template_id:
+            already_sent_user_ids = set(
+                SMSSentHistory.objects.filter(template_id=template_id).values_list('user_id', flat=True)
+            )
+            raw_phones = User.objects.filter(sms_history__template_id=template_id).exclude(phone='').values_list('phone', flat=True)
+            already_sent_phones = set(p.strip() for p in raw_phones if p)
+
         history_to_create = []
+        sent_in_this_batch = set()
+
         for user in users:
-            if user.phone:
-                res = send_sms(user.phone, message)
+            if not user.phone:
+                continue
+            
+            clean_phone = user.phone.strip()
+            if not clean_phone:
+                continue
+
+            # Skip if user has already received this template in the past
+            if template_id and (user.id in already_sent_user_ids or clean_phone in already_sent_phones):
                 results.append({
                     'user_id': user.id,
                     'phone': user.phone,
-                    'result': res
+                    'result': {'status': 'skipped_already_sent', 'message': 'Already sent template to this user or phone'}
                 })
-                if template_id and res.get('status') != 'error':
+                continue
+
+            # If the phone was already processed in this batch:
+            if clean_phone in sent_in_this_batch:
+                # Skip sending another SMS to prevent duplicates, but still log history for this user
+                # so that they are marked as sent.
+                if template_id:
                     history_to_create.append(
                         SMSSentHistory(user=user, template_id=template_id)
                     )
-        
+                results.append({
+                    'user_id': user.id,
+                    'phone': user.phone,
+                    'result': {'status': 'skipped_duplicate_phone', 'message': 'Duplicate phone number in current batch'}
+                })
+                continue
+
+            # Send SMS
+            res = send_sms(clean_phone, message)
+            results.append({
+                'user_id': user.id,
+                'phone': user.phone,
+                'result': res
+            })
+
+            if res.get('status') != 'error':
+                sent_in_this_batch.add(clean_phone)
+                if template_id:
+                    history_to_create.append(
+                        SMSSentHistory(user=user, template_id=template_id)
+                    )
+
         if history_to_create:
             SMSSentHistory.objects.bulk_create(history_to_create, ignore_conflicts=True)
-        
+
         return Response({'results': results})
 
 
