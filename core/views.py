@@ -343,22 +343,44 @@ class UserViewSet(viewsets.ModelViewSet):
             olympiads = self.request.query_params.get('registrations__olympiad').split(',')
         if olympiads:
             olympiads = [o.strip() for o in olympiads if o.strip()]
+
+        payment_status = self.request.query_params.get('payment_status') or self.request.query_params.get('registrations__payment_status')
+        if olympiads and payment_status:
+            if payment_status == 'paid':
+                queryset = queryset.filter(
+                    models.Q(registrations__olympiad__in=olympiads) & (
+                        models.Q(registrations__payment_status='paid') |
+                        models.Q(registrations__olympiad__olympiad_type='online')
+                    )
+                ).distinct()
+            elif payment_status == 'pending':
+                queryset = queryset.filter(
+                    registrations__olympiad__in=olympiads,
+                    registrations__payment_status='pending'
+                ).distinct()
+            elif payment_status == 'not_paid':
+                queryset = queryset.filter(
+                    models.Q(registrations__olympiad__in=olympiads) & ~models.Q(
+                        models.Q(registrations__payment_status__in=['paid', 'pending']) |
+                        models.Q(registrations__olympiad__olympiad_type='online')
+                    )
+                ).distinct()
+        else:
             if olympiads:
                 queryset = queryset.filter(registrations__olympiad__in=olympiads).distinct()
-
-        payment_status = self.request.query_params.get('payment_status')
-        if payment_status == 'paid':
-            queryset = queryset.filter(
-                models.Q(registrations__payment_status='paid') |
-                models.Q(registrations__olympiad__olympiad_type='online')
-            ).distinct()
-        elif payment_status == 'pending':
-            queryset = queryset.filter(registrations__payment_status='pending').distinct()
-        elif payment_status == 'not_paid':
-            queryset = queryset.filter(registrations__isnull=False).exclude(
-                models.Q(registrations__payment_status__in=['paid', 'pending']) |
-                models.Q(registrations__olympiad__olympiad_type='online')
-            ).distinct()
+            if payment_status:
+                if payment_status == 'paid':
+                    queryset = queryset.filter(
+                        models.Q(registrations__payment_status='paid') |
+                        models.Q(registrations__olympiad__olympiad_type='online')
+                    ).distinct()
+                elif payment_status == 'pending':
+                    queryset = queryset.filter(registrations__payment_status='pending').distinct()
+                elif payment_status == 'not_paid':
+                    queryset = queryset.filter(registrations__isnull=False).exclude(
+                        models.Q(registrations__payment_status__in=['paid', 'pending']) |
+                        models.Q(registrations__olympiad__olympiad_type='online')
+                    ).distinct()
 
         return queryset
 
