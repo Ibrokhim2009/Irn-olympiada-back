@@ -3,7 +3,7 @@ from django.contrib.auth.admin import UserAdmin
 from .models import (
     User, Olympiad, SubOlympiad, SubOlympiadGrade, 
     Test, Question, Registration, ExamResult, 
-    Notification, Region, SupportTicket, TicketReply
+    Notification, Region, SupportTicket, TicketReply, SMSSentHistory
 )
 
 @admin.register(User)
@@ -121,3 +121,10 @@ class SupportTicketAdmin(admin.ModelAdmin):
 class TicketReplyAdmin(admin.ModelAdmin):
     list_display = ('id', 'ticket', 'user', 'created_at')
     list_filter = ('created_at',)
+
+@admin.register(SMSSentHistory)
+class SMSSentHistoryAdmin(admin.ModelAdmin):
+    list_display = ('id', 'user', 'template_id', 'sent_at')
+    list_filter = ('sent_at', 'template_id')
+    search_fields = ('user__username', 'template_id')
+
