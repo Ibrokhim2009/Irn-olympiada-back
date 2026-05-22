@@ -287,7 +287,7 @@ class Registration(models.Model):
         
         if not self.payment_deadline and self.payment_status == self.PaymentStatus.PENDING:
             base_time = self.registered_at or timezone.now()
-            self.payment_deadline = base_time + timedelta(minutes=15)
+            self.payment_deadline = base_time + timedelta(minutes=30)
             
         if self.olympiad.generate_unique_id and not self.unique_participant_id:
             is_paid_or_free = self.payment_status in [self.PaymentStatus.PAID, self.PaymentStatus.FREE] or self.olympiad.olympiad_type == 'online'
