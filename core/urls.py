@@ -18,7 +18,8 @@ from .views import (
     NotificationViewSet, SeedNotificationsView, SendNotificationView,
     AdminStatsView, RegionViewSet, ExamResultViewSet,
     SupportTicketViewSet, TicketReplyViewSet,
-    SMSTemplateView, SMSSendView, SMSBalanceView, SMSSentHistoryView
+    SMSTemplateView, SMSSendView, SMSBalanceView, SMSSentHistoryView,
+    TelegramWebhookView
 )
 
 schema_view = get_schema_view(
@@ -82,6 +83,9 @@ urlpatterns = [
     path('sms/send/', SMSSendView.as_view(), name='sms-send'),
     path('sms/balance/', SMSBalanceView.as_view(), name='sms-balance'),
     path('sms/sent-history/', SMSSentHistoryView.as_view(), name='sms-sent-history'),
+
+    # Telegram Bot Webhook
+    path('telegram-webhook/<str:bot_type>/', TelegramWebhookView.as_view(), name='telegram-webhook'),
 
     # Swagger docs
     re_path(r'^docs(?P<format>\.json|\.yaml)$', schema_view.without_ui(cache_timeout=0), name='schema-json'),

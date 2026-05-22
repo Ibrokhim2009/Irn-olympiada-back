@@ -1681,3 +1681,63 @@ class SMSBalanceView(APIView):
         if result.get('status') == 'error':
             return Response({'error': result.get('message')}, status=503)
         return Response({'balance': result['balance']})
+
+
+class TelegramWebhookView(APIView):
+    permission_classes = (permissions.AllowAny,)
+
+    def post(self, request, bot_type):
+        import requests
+        import logging
+        logger = logging.getLogger(__name__)
+
+        if bot_type == 'academy':
+            bot_token = '8825491984:AAHwzPFiTBtprdU4MRgzzioYHfnv1TRuUig'
+        elif bot_type == 'olympiad':
+            bot_token = '8698566396:AAHOi3nHbrR9slFoUNQDI34l5kEneTPmspE'
+        else:
+            return Response({'error': 'Invalid bot type'}, status=400)
+
+        data = request.data
+        callback_query = data.get('callback_query')
+        if not callback_query:
+            return Response({'ok': True, 'message': 'No callback query'})
+
+        callback_query_id = callback_query.get('id')
+        message = callback_query.get('message', {})
+        chat_id = message.get('chat', {}).get('id')
+        message_id = message.get('message_id')
+        original_text = message.get('text', '')
+
+        callback_data = callback_query.get('data')
+
+        if callback_data == 'mark_answered' and chat_id and message_id:
+            # Escape HTML characters to prevent Telegram parse errors
+            escaped_text = original_text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            
+            if "Javob berildi" not in original_text:
+                new_text = f"{escaped_text}\n\n✅ <b>Javob berildi!</b>"
+            else:
+                new_text = escaped_text
+
+            # Update the message text and remove the inline keyboard
+            edit_url = f"https://api.telegram.org/bot{bot_token}/editMessageText"
+            edit_res = requests.post(edit_url, json={
+                'chat_id': chat_id,
+                'message_id': message_id,
+                'text': new_text,
+                'parse_mode': 'HTML'
+            })
+            logger.info(f"Telegram editMessageText response: {edit_res.text}")
+            
+            # Answer the callback query to dismiss loading indicator
+            answer_url = f"https://api.telegram.org/bot{bot_token}/answerCallbackQuery"
+            requests.post(answer_url, json={
+                'callback_query_id': callback_query_id,
+                'text': 'Ariza javob berildi deb belgilandi! ✅'
+            })
+
+            return Response({'ok': True})
+            
+        return Response({'ok': True})
+
