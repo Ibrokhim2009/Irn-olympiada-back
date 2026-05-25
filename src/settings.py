@@ -49,6 +49,12 @@ PAYME_AMOUNT_FIELD = 'price'
 PAYME_ACCOUNT_MODEL = 'core.models.Registration'
 PAYME_ONE_TIME_PAYMENT = True
 
+# ✅ CLICK SETTINGS
+CLICK_SERVICE_ID = '103414'
+CLICK_MERCHANT_ID = '21776'
+CLICK_SECRET_KEY = '97aJ6iCk0U'
+CLICK_MERCHANT_USER_ID = '85027'
+
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
@@ -134,17 +140,27 @@ CHANNEL_LAYERS = {
     },
 }
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'olympiad_db',
-        'USER': 'olympiad_user',
-        'PASSWORD': os.environ.get('DB_PASSWORD', 'NewPass2024x'),
-        'HOST': 'localhost',
-        'PORT': '5432',
-        'CONN_MAX_AGE': 60,
+import sys
+
+if 'test' in sys.argv:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': ':memory:',
+        }
     }
-}
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': 'olympiad_db',
+            'USER': 'olympiad_user',
+            'PASSWORD': os.environ.get('DB_PASSWORD', 'NewPass2024x'),
+            'HOST': 'localhost',
+            'PORT': '5432',
+            'CONN_MAX_AGE': 60,
+        }
+    }
 
 AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},

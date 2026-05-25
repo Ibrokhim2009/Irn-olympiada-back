@@ -14,7 +14,7 @@ from .views import (
     ExamView, SubmitResultView, ResultAnalysisView, PersonalResultsListView, AllResultsListView,
     RegisterView, LoginView, UserProfileView,
     TestViewSet, QuestionViewSet, UserViewSet,
-    RegistrationViewSet, PaymeCallbackView, ClickCallbackView, GetPaymeLinkView,
+    RegistrationViewSet, PaymeCallbackView, ClickCallbackView, GetPaymeLinkView, GetClickLinkView,
     NotificationViewSet, SeedNotificationsView, SendNotificationView,
     AdminStatsView, RegionViewSet, ExamResultViewSet,
     SupportTicketViewSet, TicketReplyViewSet,
@@ -77,6 +77,7 @@ urlpatterns = [
     path('payments/payme/', PaymeCallbackView.as_view(), name='payme-callback'),
     path('payments/click/', ClickCallbackView.as_view(), name='click-callback'),
     path('payments/payme/get-link/<int:registration_id>/', GetPaymeLinkView.as_view(), name='get-payme-link'),
+    path('payments/click/get-link/<int:registration_id>/', GetClickLinkView.as_view(), name='get-click-link'),
     
     # SMS
     path('sms/templates/', SMSTemplateView.as_view(), name='sms-templates'),

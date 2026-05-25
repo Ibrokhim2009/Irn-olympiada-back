@@ -1,3 +1,6 @@
+import hashlib
+import logging
+from django.conf import settings
 from django.db import models
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, status, permissions, viewsets
@@ -26,6 +29,7 @@ from .models import (
 )
 from .permissions import IsAdminUserOrReadOnly
 from .utils_payme import get_payme_link
+from .utils_click import get_click_link
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 
@@ -501,6 +505,28 @@ class GetPaymeLinkView(APIView):
         return Response({'link': link})
 
 
+class GetClickLinkView(APIView):
+    permission_classes = (permissions.IsAuthenticated,)
+
+    def get(self, request, registration_id):
+        registration = generics.get_object_or_404(Registration, id=registration_id, user=request.user)
+
+        if registration.payment_status in ['paid', 'free']:
+            return Response({'error': 'Already paid'}, status=status.HTTP_400_BAD_REQUEST)
+
+        amount = registration.olympiad.price
+        if not amount or amount <= 0:
+            return Response({'error': 'Invalid payment amount'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if registration.price != amount:
+            registration.price = amount
+            registration.save(update_fields=['price'])
+
+        return_url = request.query_params.get('return_url') or "https://irnolympiad.uz/dashboard"
+        link = get_click_link(registration.id, amount, return_url)
+        return Response({'link': link})
+
+
 from payme.views import PaymeWebHookAPIView
 
 
@@ -834,11 +860,154 @@ class SubmitResultView(APIView):
         return Response({'success': True, 'score': score})
 
 
+logger = logging.getLogger('click_payments')
+
+
 class ClickCallbackView(APIView):
     permission_classes = (permissions.AllowAny,)
 
     def post(self, request):
-        return Response({"result": "not_implemented_yet"})
+        data = request.data
+        
+        # Log request and response for auditing
+        logger.info(f"Click callback request received: {data}")
+        print(f"Click callback request received: {data}")
+
+        click_trans_id = data.get('click_trans_id')
+        service_id = data.get('service_id')
+        click_paydoc_id = data.get('click_paydoc_id')
+        merchant_trans_id = data.get('merchant_trans_id')
+        amount = data.get('amount')
+        action = data.get('action')
+        error = data.get('error')
+        error_note = data.get('error_note')
+        sign_time = data.get('sign_time')
+        sign_string = data.get('sign_string')
+        merchant_prepare_id = data.get('merchant_prepare_id')
+
+        # Check required fields
+        if None in [click_trans_id, service_id, merchant_trans_id, amount, action, error, sign_time, sign_string]:
+            logger.error("Click Request Missing Required Parameters")
+            return Response({
+                "error": -2,
+                "error_note": "Incorrect parameters"
+            })
+
+        # Validate types
+        try:
+            action = int(action)
+            error = int(error)
+        except ValueError:
+            logger.error("Click Request Invalid action/error type")
+            return Response({
+                "error": -2,
+                "error_note": "Invalid action or error parameter"
+            })
+
+        # Verify signature
+        secret_key = settings.CLICK_SECRET_KEY
+        
+        if action == 0:
+            raw_sign = f"{click_trans_id}{service_id}{secret_key}{merchant_trans_id}{amount}{action}{sign_time}"
+        elif action == 1:
+            raw_sign = f"{click_trans_id}{service_id}{secret_key}{merchant_trans_id}{merchant_prepare_id}{amount}{action}{sign_time}"
+        else:
+            logger.error(f"Click Request Invalid Action: {action}")
+            return Response({
+                "error": -3,
+                "error_note": "Action not found"
+            })
+
+        calculated_sign = hashlib.md5(raw_sign.encode('utf-8')).hexdigest()
+        
+        if calculated_sign != sign_string:
+            logger.error(f"Click Request Sign Verification Failed. Got: {sign_string}, Expected: {calculated_sign}")
+            return Response({
+                "error": -1,
+                "error_note": "SIGN CHECK FAILED"
+            })
+
+        # Check if the registration exists
+        try:
+            registration = Registration.objects.get(id=int(merchant_trans_id))
+        except (Registration.DoesNotExist, ValueError):
+            logger.error(f"Click Request Registration Not Found: {merchant_trans_id}")
+            return Response({
+                "error": -5,
+                "error_note": "User/Registration not found"
+            })
+
+        # Check if the amount matches
+        try:
+            expected_amount = float(registration.price)
+            received_amount = float(amount)
+            if abs(expected_amount - received_amount) > 0.01:
+                logger.error(f"Click Request Amount Mismatch. Expected: {expected_amount}, Received: {received_amount}")
+                return Response({
+                    "error": -2,
+                    "error_note": "Incorrect parameter amount"
+                })
+        except ValueError:
+            logger.error("Click Request Invalid Amount Type")
+            return Response({
+                "error": -2,
+                "error_note": "Invalid amount"
+            })
+
+        if action == 0:
+            # Prepare stage
+            if registration.payment_status == Registration.PaymentStatus.PAID:
+                logger.warning(f"Click Request Prepare failed: Registration {registration.id} is already paid")
+                return Response({
+                    "error": -4,
+                    "error_note": "Already paid"
+                })
+
+            registration.transaction_id = f"CLICK_{click_trans_id}"
+            registration.save(update_fields=['transaction_id'])
+            
+            logger.info(f"Click Prepare success for Registration {registration.id}")
+            return Response({
+                "click_trans_id": click_trans_id,
+                "merchant_trans_id": merchant_trans_id,
+                "merchant_prepare_id": registration.id,
+                "error": 0,
+                "error_note": "Success"
+            })
+
+        elif action == 1:
+            # Complete stage
+            if error < 0:
+                logger.error(f"Click complete received error from Click: {error_note}")
+                registration.payment_status = Registration.PaymentStatus.PENDING
+                registration.save(update_fields=['payment_status'])
+                return Response({
+                    "error": error,
+                    "error_note": error_note or "Transaction failed"
+                })
+
+            if registration.payment_status == Registration.PaymentStatus.PAID:
+                logger.info(f"Click Complete success (already paid) for Registration {registration.id}")
+                return Response({
+                    "click_trans_id": click_trans_id,
+                    "merchant_trans_id": merchant_trans_id,
+                    "merchant_confirm_id": registration.id,
+                    "error": 0,
+                    "error_note": "Success"
+                })
+
+            registration.payment_status = Registration.PaymentStatus.PAID
+            registration.transaction_id = f"CLICK_{click_trans_id}"
+            registration.save(update_fields=['payment_status', 'transaction_id'])
+
+            logger.info(f"✅ Click Complete success: Registration {registration.id} marked as PAID")
+            return Response({
+                "click_trans_id": click_trans_id,
+                "merchant_trans_id": merchant_trans_id,
+                "merchant_confirm_id": registration.id,
+                "error": 0,
+                "error_note": "Success"
+            })
 
 
 class NotificationViewSet(viewsets.ModelViewSet):
