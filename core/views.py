@@ -907,21 +907,47 @@ class ClickCallbackView(APIView):
         # Verify signature
         secret_key = settings.CLICK_SECRET_KEY
         
-        if action == 0:
-            raw_sign = f"{click_trans_id}{service_id}{secret_key}{merchant_trans_id}{amount}{action}{sign_time}"
-        elif action == 1:
-            raw_sign = f"{click_trans_id}{service_id}{secret_key}{merchant_trans_id}{merchant_prepare_id}{amount}{action}{sign_time}"
-        else:
-            logger.error(f"Click Request Invalid Action: {action}")
-            return Response({
-                "error": -3,
-                "error_note": "Action not found"
-            })
+        # Build candidate amount strings to handle varying formats sent by Click
+        amount_candidates = [str(amount)]
+        try:
+            float_amount = float(amount)
+            amount_candidates.append(f"{float_amount:.2f}")
+            amount_candidates.append(f"{float_amount:.1f}")
+            amount_candidates.append(f"{int(float_amount)}")
+        except (ValueError, TypeError):
+            pass
 
-        calculated_sign = hashlib.md5(raw_sign.encode('utf-8')).hexdigest()
+        # De-duplicate while preserving order
+        unique_candidates = []
+        for amt in amount_candidates:
+            if amt not in unique_candidates:
+                unique_candidates.append(amt)
+
+        verified = False
+        calculated_sign = ""
         
-        if calculated_sign != sign_string:
-            logger.error(f"Click Request Sign Verification Failed. Got: {sign_string}, Expected: {calculated_sign}")
+        for amt_candidate in unique_candidates:
+            if action == 0:
+                raw_sign = f"{click_trans_id}{service_id}{secret_key}{merchant_trans_id}{amt_candidate}{action}{sign_time}"
+            elif action == 1:
+                raw_sign = f"{click_trans_id}{service_id}{secret_key}{merchant_trans_id}{merchant_prepare_id}{amt_candidate}{action}{sign_time}"
+            else:
+                logger.error(f"Click Request Invalid Action: {action}")
+                return Response({
+                    "error": -3,
+                    "error_note": "Action not found"
+                })
+
+            candidate_sign = hashlib.md5(raw_sign.encode('utf-8')).hexdigest()
+            if candidate_sign == sign_string:
+                verified = True
+                calculated_sign = candidate_sign
+                break
+            if not calculated_sign:
+                calculated_sign = candidate_sign
+
+        if not verified:
+            logger.error(f"Click Request Sign Verification Failed. Got: {sign_string}, Expected one of signature candidates. Sample: {calculated_sign}")
             return Response({
                 "error": -1,
                 "error_note": "SIGN CHECK FAILED"
