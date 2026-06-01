@@ -455,6 +455,13 @@ class RegistrationViewSet(viewsets.ModelViewSet):
         if not (user.role in ['admin', 'superadmin'] or user.is_staff):
             from rest_framework.exceptions import PermissionDenied
             raise PermissionDenied("Only administrators can update registration data.")
+        
+        # Mark as manually edited if payment_status changed
+        old_instance = self.get_object()
+        new_status = serializer.validated_data.get('payment_status')
+        if new_status and new_status != old_instance.payment_status:
+            serializer.validated_data['transaction_id'] = 'manual'
+            
         serializer.save()
 
     def get_queryset(self):
