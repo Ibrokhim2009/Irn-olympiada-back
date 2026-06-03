@@ -2,3 +2,12 @@
 staticfiles/
 db.sqlite3
 .env.example
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
