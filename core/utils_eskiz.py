@@ -120,7 +120,8 @@ def get_templates():
                                 'text': t_text,
                                 'status': norm_status,
                                 'created_at': t_created,
-                                'note': t_note
+                                'note': t_note,
+                                'type': 'advertising' if t_status == 'reklama' else 'service'
                             })
                     break # Stop trying other endpoints if we got a valid non-empty list
         except Exception as e:
