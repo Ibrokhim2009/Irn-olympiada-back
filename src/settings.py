@@ -36,7 +36,6 @@ INSTALLED_APPS = [
     'channels',
     'core',
     'payme',
-    'click',
 ]
 
 # ✅ PAYME SETTINGS
