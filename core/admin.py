@@ -3,7 +3,8 @@ from django.contrib.auth.admin import UserAdmin
 from .models import (
     User, Olympiad, SubOlympiad, SubOlympiadGrade, 
     Test, Question, Registration, ExamResult, 
-    Notification, Region, SupportTicket, TicketReply, SMSSentHistory
+    Notification, Region, SupportTicket, TicketReply, SMSSentHistory,
+    ClickTransactions
 )
 
 @admin.register(User)
@@ -127,4 +128,12 @@ class SMSSentHistoryAdmin(admin.ModelAdmin):
     list_display = ('id', 'user', 'template_id', 'sent_at')
     list_filter = ('sent_at', 'template_id')
     search_fields = ('user__username', 'template_id')
+
+
+@admin.register(ClickTransactions)
+class ClickTransactionsAdmin(admin.ModelAdmin):
+    list_display = ('id', 'transaction_id', 'registration', 'amount', 'state', 'created_at')
+    list_filter = ('state', 'created_at')
+    search_fields = ('transaction_id', 'click_paydoc_id', 'registration__id', 'registration__user__username')
+
 

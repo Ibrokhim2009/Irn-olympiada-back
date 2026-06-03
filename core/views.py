@@ -25,7 +25,7 @@ from .models import (
     User, Olympiad, SubOlympiad, SubOlympiadGrade,
     Registration, ExamResult, Test, Question,
     Notification, Region, SupportTicket, TicketReply,
-    SMSSentHistory
+    SMSSentHistory, ClickTransactions
 )
 from .permissions import IsAdminUserOrReadOnly
 from .utils_payme import get_payme_link
@@ -999,6 +999,17 @@ class ClickCallbackView(APIView):
             registration.transaction_id = f"CLICK_{click_trans_id}"
             registration.save(update_fields=['transaction_id'])
             
+            # Log prepared transaction
+            ClickTransactions.objects.update_or_create(
+                transaction_id=str(click_trans_id),
+                defaults={
+                    'click_paydoc_id': str(click_paydoc_id) if click_paydoc_id else None,
+                    'registration': registration,
+                    'amount': amount,
+                    'state': ClickTransactions.INITIATING
+                }
+            )
+            
             logger.info(f"Click Prepare success for Registration {registration.id}")
             return Response({
                 "click_trans_id": click_trans_id,
@@ -1014,6 +1025,19 @@ class ClickCallbackView(APIView):
                 logger.error(f"Click complete received error from Click: {error_note}")
                 registration.payment_status = Registration.PaymentStatus.PENDING
                 registration.save(update_fields=['payment_status'])
+
+                # Log failed transaction
+                ClickTransactions.objects.update_or_create(
+                    transaction_id=str(click_trans_id),
+                    defaults={
+                        'click_paydoc_id': str(click_paydoc_id) if click_paydoc_id else None,
+                        'registration': registration,
+                        'amount': amount,
+                        'state': ClickTransactions.CANCELED_DURING_INIT,
+                        'cancel_reason': error_note or f"Error code: {error}",
+                        'cancelled_at': timezone.now()
+                    }
+                )
                 return Response({
                     "error": error,
                     "error_note": error_note or "Transaction failed"
@@ -1021,6 +1045,17 @@ class ClickCallbackView(APIView):
 
             if registration.payment_status == Registration.PaymentStatus.PAID:
                 logger.info(f"Click Complete success (already paid) for Registration {registration.id}")
+                # Log already paid/successful transaction
+                ClickTransactions.objects.update_or_create(
+                    transaction_id=str(click_trans_id),
+                    defaults={
+                        'click_paydoc_id': str(click_paydoc_id) if click_paydoc_id else None,
+                        'registration': registration,
+                        'amount': amount,
+                        'state': ClickTransactions.SUCCESSFULLY,
+                        'performed_at': timezone.now()
+                    }
+                )
                 return Response({
                     "click_trans_id": click_trans_id,
                     "merchant_trans_id": merchant_trans_id,
@@ -1032,6 +1067,18 @@ class ClickCallbackView(APIView):
             registration.payment_status = Registration.PaymentStatus.PAID
             registration.transaction_id = f"CLICK_{click_trans_id}"
             registration.save(update_fields=['payment_status', 'transaction_id'])
+
+            # Log successfully completed transaction
+            ClickTransactions.objects.update_or_create(
+                transaction_id=str(click_trans_id),
+                defaults={
+                    'click_paydoc_id': str(click_paydoc_id) if click_paydoc_id else None,
+                    'registration': registration,
+                    'amount': amount,
+                    'state': ClickTransactions.SUCCESSFULLY,
+                    'performed_at': timezone.now()
+                }
+            )
 
             logger.info(f"✅ Click Complete success: Registration {registration.id} marked as PAID")
             return Response({

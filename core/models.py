@@ -450,3 +450,40 @@ class SMSSentHistory(models.Model):
     def __str__(self):
         return f"SMS to {self.user.username} (Template: {self.template_id})"
 
+
+class ClickTransactions(models.Model):
+    CREATED = 0
+    INITIATING = 1
+    SUCCESSFULLY = 2
+    CANCELED = -2
+    CANCELED_DURING_INIT = -1
+
+    STATE = [
+        (CREATED, "Created"),
+        (INITIATING, "Initiating"),
+        (SUCCESSFULLY, "Successfully"),
+        (CANCELED, "Canceled after successful performed"),
+        (CANCELED_DURING_INIT, "Canceled during initiation"),
+    ]
+
+    transaction_id = models.CharField(max_length=50, unique=True, verbose_name="ID транзакции Click")
+    click_paydoc_id = models.CharField(max_length=50, null=True, blank=True, verbose_name="ID платежного документа Click")
+    registration = models.ForeignKey('Registration', on_delete=models.SET_NULL, null=True, blank=True, related_name='click_transactions', verbose_name="Регистрация")
+    amount = models.DecimalField(max_digits=15, decimal_places=2, verbose_name="Сумма")
+    state = models.IntegerField(choices=STATE, default=CREATED, verbose_name="Статус")
+    cancel_reason = models.CharField(max_length=255, null=True, blank=True, verbose_name="Причина отмены/Ошибка")
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True, verbose_name="Создано в")
+    updated_at = models.DateTimeField(auto_now=True, db_index=True, verbose_name="Изменено в")
+    performed_at = models.DateTimeField(null=True, blank=True, db_index=True, verbose_name="Выполнено в")
+    cancelled_at = models.DateTimeField(null=True, blank=True, db_index=True, verbose_name="Отменено в")
+
+    class Meta:
+        verbose_name = "CLICK Transaction"
+        verbose_name_plural = "CLICK Transactions"
+        ordering = ["-created_at"]
+        db_table = "click_transactions"
+
+    def __str__(self):
+        return f"CLICK Transaction #{self.transaction_id} Registration: {self.registration_id} - {self.get_state_display()}"
+
+
