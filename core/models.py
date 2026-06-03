@@ -468,7 +468,7 @@ class ClickTransactions(models.Model):
 
     transaction_id = models.CharField(max_length=50, unique=True, verbose_name="ID транзакции Click")
     click_paydoc_id = models.CharField(max_length=50, null=True, blank=True, verbose_name="ID платежного документа Click")
-    registration = models.ForeignKey('Registration', on_delete=models.SET_NULL, null=True, blank=True, related_name='click_transactions', verbose_name="Регистрация")
+    registration = models.ForeignKey('core.Registration', on_delete=models.SET_NULL, null=True, blank=True, related_name='click_transactions', verbose_name="Регистрация")
     amount = models.DecimalField(max_digits=15, decimal_places=2, verbose_name="Сумма")
     state = models.IntegerField(choices=STATE, default=CREATED, verbose_name="Статус")
     cancel_reason = models.CharField(max_length=255, null=True, blank=True, verbose_name="Причина отмены/Ошибка")
@@ -478,6 +478,7 @@ class ClickTransactions(models.Model):
     cancelled_at = models.DateTimeField(null=True, blank=True, db_index=True, verbose_name="Отменено в")
 
     class Meta:
+        app_label = 'payme'
         verbose_name = "CLICK Transaction"
         verbose_name_plural = "CLICK Transactions"
         ordering = ["-created_at"]
