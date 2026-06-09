@@ -27,7 +27,7 @@ from .models import (
     Notification, Region, SupportTicket, TicketReply,
     SMSSentHistory, ClickTransactions
 )
-from .permissions import IsAdminUserOrReadOnly
+from .permissions import IsAdminUserOrReadOnly, IsAdminOrCoordinatorReadOnly
 from .utils_payme import get_payme_link
 from .utils_click import get_click_link
 from asgiref.sync import async_to_sync
@@ -299,7 +299,7 @@ class UserPagination(PageNumberPagination):
 
 class UserViewSet(viewsets.ModelViewSet):
     serializer_class = UserSerializer
-    permission_classes = (permissions.IsAdminUser,)
+    permission_classes = (IsAdminOrCoordinatorReadOnly,)
     pagination_class = UserPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = []
@@ -312,7 +312,13 @@ class UserViewSet(viewsets.ModelViewSet):
         return self.serializer_class
 
     def get_queryset(self):
-        queryset = User.objects.filter(role=User.Role.PARTICIPANT)
+        role = self.request.query_params.get('role')
+        if role:
+            queryset = User.objects.filter(role=role)
+        elif self.action in ['retrieve', 'update', 'partial_update', 'destroy']:
+            queryset = User.objects.all()
+        else:
+            queryset = User.objects.filter(role=User.Role.PARTICIPANT)
         if self.action in ['retrieve', 'update', 'partial_update']:
             queryset = queryset.prefetch_related(
                 'registrations__olympiad',
@@ -452,7 +458,7 @@ class RegistrationViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         user = self.request.user
-        if not (user.role in ['admin', 'superadmin'] or user.is_staff):
+        if not (user.role in ['admin', 'superadmin']):
             from rest_framework.exceptions import PermissionDenied
             raise PermissionDenied("Only administrators can update registration data.")
         
@@ -480,7 +486,7 @@ class RegistrationViewSet(viewsets.ModelViewSet):
 
     def perform_destroy(self, instance):
         user = self.request.user
-        is_admin = user.role in ['admin', 'superadmin'] or user.is_staff
+        is_admin = user.role in ['admin', 'superadmin']
         
         if not is_admin:
             if instance.payment_status not in [Registration.PaymentStatus.PENDING, Registration.PaymentStatus.EXPIRED]:
@@ -1655,7 +1661,7 @@ class AllResultsListView(APIView):
 class ExamResultViewSet(viewsets.ModelViewSet):
     queryset = ExamResult.objects.all().select_related('user', 'olympiad', 'sub_olympiad_grade')
     serializer_class = ExamResultSerializer
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = (IsAdminOrCoordinatorReadOnly,)
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ['sub_olympiad_grade', 'user', 'olympiad']
 

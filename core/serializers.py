@@ -195,13 +195,33 @@ class UserSerializer(serializers.ModelSerializer):
     exam_results = ExamResultSerializer(many=True, read_only=True)
     notifications = NotificationSerializer(many=True, read_only=True)
     achievements = UserAchievementSerializer(many=True, read_only=True)
+    password = serializers.CharField(write_only=True, required=False)
+    school = serializers.CharField(required=False, allow_blank=True, default='')
 
     class Meta:
         model = User
         fields = ('id', 'username', 'email', 'first_name', 'last_name', 'middle_name',
                   'phone', 'birth_date', 'region', 'school', 'grade', 'role', 'participant_id',
-                  'teacher_name', 'teacher_phone', 'teachers', 'password_text',
+                  'teacher_name', 'teacher_phone', 'teachers', 'password_text', 'password',
                   'registrations', 'exam_results', 'notifications', 'achievements')
+
+    def create(self, validated_data):
+        password = validated_data.pop('password', None)
+        user = super().create(validated_data)
+        if password:
+            user.set_password(password)
+            user.password_text = password
+            user.save()
+        return user
+
+    def update(self, instance, validated_data):
+        password = validated_data.pop('password', None)
+        user = super().update(instance, validated_data)
+        if password:
+            user.set_password(password)
+            user.password_text = password
+            user.save()
+        return user
 
 
 class UserListSerializer(serializers.ModelSerializer):

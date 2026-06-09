@@ -51,6 +51,7 @@ class User(AbstractUser):
     class Role(models.TextChoices):
         SUPERADMIN = 'superadmin', 'Суперадмин'
         ADMIN = 'admin', 'Администратор'
+        COORDINATOR = 'coordinator', 'Координатор'
         PARTICIPANT = 'participant', 'Участник'
 
     role = models.CharField(max_length=20, choices=Role.choices, default=Role.PARTICIPANT)
@@ -75,8 +76,10 @@ class User(AbstractUser):
     objects = UserManager()
 
     def save(self, *args, **kwargs):
-        if self.role in [self.Role.ADMIN, self.Role.SUPERADMIN]:
+        if self.role in [self.Role.ADMIN, self.Role.SUPERADMIN, self.Role.COORDINATOR]:
             self.is_staff = True
+            if not self.school:
+                self.school = "Staff"
             
         if not self.participant_id:
             import random
