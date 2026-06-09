@@ -1480,7 +1480,7 @@ class AllResultsListView(APIView):
     pagination_class = ResultsPagination
 
     def get(self, request):
-        if request.user.role != User.Role.ADMIN and not request.user.is_superuser:
+        if request.user.role not in [User.Role.ADMIN, User.Role.COORDINATOR] and not request.user.is_superuser:
             return Response({'error': 'Forbidden'}, status=403)
 
         lang = request.query_params.get('lang', 'uz')
