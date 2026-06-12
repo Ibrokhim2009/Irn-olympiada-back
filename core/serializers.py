@@ -3,7 +3,7 @@ from .models import (
     User, Olympiad, SubOlympiad, SubOlympiadGrade,
     Question, Test, Registration, ExamResult,
     Notification, Region, UserAchievement,
-    SupportTicket, TicketReply
+    SupportTicket, TicketReply, EditRequest
 )
 import base64
 import uuid
@@ -476,3 +476,37 @@ class SupportTicketSerializer(serializers.ModelSerializer):
             return obj.get_status_display()
         except:
             return obj.status
+
+
+class EditRequestSerializer(serializers.ModelSerializer):
+    coordinator_name = serializers.SerializerMethodField()
+    reviewed_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = EditRequest
+        fields = (
+            'id', 'coordinator', 'coordinator_name',
+            'target_type', 'target_id', 'target_display',
+            'proposed_changes', 'current_data',
+            'status', 'admin_note',
+            'reviewed_by', 'reviewed_by_name',
+            'created_at', 'updated_at'
+        )
+        read_only_fields = (
+            'coordinator', 'status', 'reviewed_by',
+            'reviewed_by_name', 'created_at', 'updated_at'
+        )
+
+    def get_coordinator_name(self, obj):
+        try:
+            return f"{obj.coordinator.last_name} {obj.coordinator.first_name}".strip() or obj.coordinator.username
+        except:
+            return "Unknown"
+
+    def get_reviewed_by_name(self, obj):
+        if not obj.reviewed_by:
+            return None
+        try:
+            return f"{obj.reviewed_by.last_name} {obj.reviewed_by.first_name}".strip() or obj.reviewed_by.username
+        except:
+            return None

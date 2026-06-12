@@ -19,13 +19,13 @@ from .serializers import (
     OlympiadSerializer, SubOlympiadSerializer, SubOlympiadGradeSerializer,
     QuestionSerializer, QuestionExamSerializer, RegistrationSerializer,
     TestSerializer, NotificationSerializer, RegionSerializer, ExamResultSerializer,
-    SupportTicketSerializer, TicketReplySerializer
+    SupportTicketSerializer, TicketReplySerializer, EditRequestSerializer
 )
 from .models import (
     User, Olympiad, SubOlympiad, SubOlympiadGrade,
     Registration, ExamResult, Test, Question,
     Notification, Region, SupportTicket, TicketReply,
-    SMSSentHistory, ClickTransactions
+    SMSSentHistory, ClickTransactions, EditRequest
 )
 from .permissions import IsAdminUserOrReadOnly, IsAdminOrCoordinatorReadOnly
 from .utils_payme import get_payme_link
@@ -1671,7 +1671,7 @@ class ExamResultViewSet(viewsets.ModelViewSet):
         result.delete()
         return Response({'success': True, 'message': 'Result reset successfully'})
 
-    @action(detail=True, methods=['get', 'post'], permission_classes=[permissions.IsAdminUser])
+    @action(detail=True, methods=['get', 'post'], permission_classes=[IsAdminOrCoordinatorReadOnly])
     def edit_answers(self, request, pk=None):
         result = self.get_object()
         
@@ -1995,4 +1995,120 @@ class TelegramWebhookView(APIView):
             return Response({'ok': True})
             
         return Response({'ok': True})
+
+
+class EditRequestViewSet(viewsets.ModelViewSet):
+    """
+    Coordinators create edit requests.
+    Admins list, approve, or reject them.
+    """
+    serializer_class = EditRequestSerializer
+    permission_classes = (permissions.IsAuthenticated,)
+    http_method_names = ['get', 'post', 'head', 'options']
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.role in ['admin', 'superadmin']:
+            status_filter = self.request.query_params.get('status')
+            qs = EditRequest.objects.all()
+            if status_filter:
+                qs = qs.filter(status=status_filter)
+            return qs
+        # Coordinators see only their own requests
+        return EditRequest.objects.filter(coordinator=user)
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        if user.role not in ['coordinator', 'admin', 'superadmin']:
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("Only coordinators can submit edit requests.")
+        serializer.save(coordinator=user)
+
+    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAdminUser])
+    def approve(self, request, pk=None):
+        edit_req = self.get_object()
+        if edit_req.status != EditRequest.Status.PENDING:
+            return Response(
+                {'error': 'This request has already been reviewed.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            if edit_req.target_type == EditRequest.TargetType.USER:
+                target = User.objects.get(pk=edit_req.target_id)
+                allowed_fields = [
+                    'first_name', 'last_name', 'middle_name', 'phone',
+                    'school', 'grade', 'birth_date', 'region',
+                    'teacher_name', 'teacher_phone', 'teachers'
+                ]
+                for field, value in edit_req.proposed_changes.items():
+                    if field == 'new_password' and value:
+                        target.set_password(value)
+                        target.password_text = value
+                    elif field == 'region':
+                        target.region_id = value
+                    elif field in allowed_fields:
+                        setattr(target, field, value)
+                target.save()
+
+            elif edit_req.target_type == EditRequest.TargetType.RESULT:
+                target = ExamResult.objects.get(pk=edit_req.target_id)
+                allowed_fields = ['score', 'answers_json']
+                for field, value in edit_req.proposed_changes.items():
+                    if field in allowed_fields:
+                        setattr(target, field, value)
+
+                # Recalculate score when answers_json is updated
+                if 'answers_json' in edit_req.proposed_changes:
+                    test = None
+                    if target.sub_olympiad_grade:
+                        test = getattr(target.sub_olympiad_grade, 'test', None)
+                    else:
+                        test = getattr(target.olympiad, 'test', None)
+                    if test:
+                        questions = test.questions.all()
+                        if questions.exists():
+                            new_answers = target.answers_json or {}
+                            correct_count = sum(
+                                1 for q in questions
+                                if str(new_answers.get(str(q.id))) == str(q.correct_option)
+                            )
+                            target.score = round((correct_count / questions.count()) * 100)
+                target.save()
+
+            elif edit_req.target_type == EditRequest.TargetType.REGISTRATION:
+                target = Registration.objects.get(pk=edit_req.target_id)
+                allowed_fields = ['payment_status']
+                for field, value in edit_req.proposed_changes.items():
+                    if field in allowed_fields:
+                        setattr(target, field, value)
+                target.save()
+
+            else:
+                return Response({'error': 'Unknown target type'}, status=400)
+        except (User.DoesNotExist, ExamResult.DoesNotExist, Registration.DoesNotExist):
+            return Response({'error': 'Target record not found.'}, status=404)
+
+        edit_req.status = EditRequest.Status.APPROVED
+        edit_req.reviewed_by = request.user
+        edit_req.admin_note = request.data.get('admin_note', '')
+        edit_req.save()
+
+        return Response({'success': True, 'status': 'approved'})
+
+    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAdminUser])
+    def reject(self, request, pk=None):
+        edit_req = self.get_object()
+        if edit_req.status != EditRequest.Status.PENDING:
+            return Response(
+                {'error': 'This request has already been reviewed.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        edit_req.status = EditRequest.Status.REJECTED
+        edit_req.reviewed_by = request.user
+        edit_req.admin_note = request.data.get('admin_note', '')
+        edit_req.save()
+
+        return Response({'success': True, 'status': 'rejected'})
 

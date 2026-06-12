@@ -454,6 +454,48 @@ class SMSSentHistory(models.Model):
         return f"SMS to {self.user.username} (Template: {self.template_id})"
 
 
+class EditRequest(models.Model):
+    """
+    A request from a coordinator to edit a User or ExamResult record.
+    Admin can approve (apply changes) or reject the request.
+    """
+    class Status(models.TextChoices):
+        PENDING = 'pending', 'На рассмотрении'
+        APPROVED = 'approved', 'Одобрено'
+        REJECTED = 'rejected', 'Отклонено'
+
+    class TargetType(models.TextChoices):
+        USER = 'user', 'Пользователь'
+        RESULT = 'result', 'Результат'
+        REGISTRATION = 'registration', 'Регистрация'
+
+    coordinator = models.ForeignKey(
+        User, on_delete=models.CASCADE,
+        related_name='edit_requests_sent'
+    )
+    target_type = models.CharField(max_length=20, choices=TargetType.choices)
+    target_id = models.PositiveIntegerField()
+    target_display = models.CharField(max_length=255, blank=True, help_text="Name/label of the target for display")
+    proposed_changes = models.JSONField(help_text="Dict of {field: new_value}")
+    current_data = models.JSONField(blank=True, null=True, help_text="Snapshot of current values before change")
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.PENDING, db_index=True)
+    admin_note = models.TextField(blank=True, null=True)
+    reviewed_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='edit_requests_reviewed'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Запрос на редактирование"
+        verbose_name_plural = "Запросы на редактирование"
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.coordinator.username} → {self.target_type}#{self.target_id} ({self.status})"
+
+
 class ClickTransactions(models.Model):
     CREATED = 0
     INITIATING = 1
