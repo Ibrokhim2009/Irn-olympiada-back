@@ -1210,6 +1210,44 @@ class AdminStatsView(APIView):
         active_guests = {k: v for k, v in guests.items() if v > current_ts - 300}
         online_guests_count = len(active_guests)
 
+        # Registration stats by date
+        from datetime import timedelta
+        try:
+            today_date = timezone.localdate()
+        except Exception:
+            today_date = timezone.now().date()
+        yesterday_date = today_date - timedelta(days=1)
+
+        registered_today = User.objects.filter(role=User.Role.PARTICIPANT, date_joined__date=today_date).count()
+        registered_yesterday = User.objects.filter(role=User.Role.PARTICIPANT, date_joined__date=yesterday_date).count()
+
+        start_date_str = request.query_params.get('start_date')
+        end_date_str = request.query_params.get('end_date')
+        calendar_total = 0
+        calendar_daily = []
+        if start_date_str and end_date_str:
+            try:
+                from datetime import datetime
+                start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+                end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
+                range_users = User.objects.filter(
+                    role=User.Role.PARTICIPANT,
+                    date_joined__date__range=(start_date, end_date)
+                )
+                calendar_total = range_users.count()
+                daily_stats = range_users.values('date_joined__date').annotate(
+                    count=models.Count('id')
+                ).order_by('date_joined__date')
+                calendar_daily = [
+                    {
+                        'date': item['date_joined__date'].strftime('%Y-%m-%d'),
+                        'count': item['count']
+                    }
+                    for item in daily_stats if item['date_joined__date']
+                ]
+            except Exception as e:
+                print(f"Error parsing dates for calendar registration count: {e}")
+
         return Response({
             'total_users': total_users,
             'total_participants': total_users,
@@ -1227,7 +1265,11 @@ class AdminStatsView(APIView):
             'online_registrations': online_registrations,
             'offline_registrations': offline_registrations,
             'oly_fill': oly_fill,
-            'trend_data': trend_data
+            'trend_data': trend_data,
+            'registered_today': registered_today,
+            'registered_yesterday': registered_yesterday,
+            'calendar_total': calendar_total,
+            'calendar_daily': calendar_daily
         })
 
 
@@ -2004,7 +2046,14 @@ class EditRequestViewSet(viewsets.ModelViewSet):
     """
     serializer_class = EditRequestSerializer
     permission_classes = (permissions.IsAuthenticated,)
-    http_method_names = ['get', 'post', 'head', 'options']
+    http_method_names = ['get', 'post', 'delete', 'head', 'options']
+
+    def destroy(self, request, *args, **kwargs):
+        user = request.user
+        if user.role not in ['admin', 'superadmin']:
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("Only admins can delete edit requests.")
+        return super().destroy(request, *args, **kwargs)
 
     def get_queryset(self):
         user = self.request.user
@@ -2077,12 +2126,28 @@ class EditRequestViewSet(viewsets.ModelViewSet):
                 target.save()
 
             elif edit_req.target_type == EditRequest.TargetType.REGISTRATION:
-                target = Registration.objects.get(pk=edit_req.target_id)
-                allowed_fields = ['payment_status']
-                for field, value in edit_req.proposed_changes.items():
-                    if field in allowed_fields:
-                        setattr(target, field, value)
-                target.save()
+                if edit_req.target_id == 0:
+                    user_id = edit_req.proposed_changes.get('_register_user_id')
+                    olympiad_id = edit_req.proposed_changes.get('_register_olympiad_id')
+                    payment_status = edit_req.proposed_changes.get('payment_status', 'pending')
+                    
+                    try:
+                        user = User.objects.get(pk=user_id)
+                        olympiad = Olympiad.objects.get(pk=olympiad_id)
+                        target, created = Registration.objects.get_or_create(
+                            user=user,
+                            olympiad=olympiad,
+                            defaults={'payment_status': payment_status}
+                        )
+                    except (User.DoesNotExist, Olympiad.DoesNotExist):
+                        return Response({'error': 'User or Olympiad not found.'}, status=404)
+                else:
+                    target = Registration.objects.get(pk=edit_req.target_id)
+                    allowed_fields = ['payment_status']
+                    for field, value in edit_req.proposed_changes.items():
+                        if field in allowed_fields:
+                            setattr(target, field, value)
+                    target.save()
 
             else:
                 return Response({'error': 'Unknown target type'}, status=400)

@@ -4,7 +4,7 @@ from .models import (
     User, Olympiad, SubOlympiad, SubOlympiadGrade, 
     Test, Question, Registration, ExamResult, 
     Notification, Region, SupportTicket, TicketReply, SMSSentHistory,
-    ClickTransactions
+    ClickTransactions, EditRequest
 )
 
 @admin.register(User)
@@ -135,5 +135,13 @@ class ClickTransactionsAdmin(admin.ModelAdmin):
     list_display = ('id', 'transaction_id', 'registration', 'amount', 'state', 'created_at')
     list_filter = ('state', 'created_at')
     search_fields = ('transaction_id', 'click_paydoc_id', 'registration__id', 'registration__user__username')
+
+
+@admin.register(EditRequest)
+class EditRequestAdmin(admin.ModelAdmin):
+    list_display = ('id', 'coordinator', 'target_type', 'target_id', 'status', 'created_at')
+    list_filter = ('status', 'target_type', 'created_at')
+    search_fields = ('coordinator__username', 'coordinator__first_name', 'coordinator__last_name', 'target_display')
+
 
 
