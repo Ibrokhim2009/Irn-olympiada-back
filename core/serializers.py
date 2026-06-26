@@ -28,6 +28,19 @@ class RegistrationSerializer(serializers.ModelSerializer):
     def get_status_label(self, obj):
         return obj.get_payment_status_display()
 
+    def to_representation(self, instance):
+        if instance.olympiad.generate_unique_id and not instance.unique_participant_id:
+            if instance.payment_status in ['paid', 'free'] or instance.olympiad.olympiad_type == 'online':
+                import random
+                prefix = (instance.olympiad.unique_id_prefix or "OLY").strip()
+                while True:
+                    new_id = f"{prefix}-{random.randint(100000, 999999)}"
+                    if not Registration.objects.filter(unique_participant_id=new_id).exists():
+                        instance.unique_participant_id = new_id
+                        instance.save(update_fields=['unique_participant_id'])
+                        break
+        return super().to_representation(instance)
+
 
 class RegionSerializer(serializers.ModelSerializer):
     class Meta:

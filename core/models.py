@@ -288,9 +288,15 @@ class Registration(models.Model):
         from datetime import timedelta
         import random
         
+        update_fields = kwargs.get('update_fields')
+        if update_fields is not None:
+            update_fields = set(update_fields)
+
         if not self.payment_deadline and self.payment_status == self.PaymentStatus.PENDING:
             base_time = self.registered_at or timezone.now()
             self.payment_deadline = base_time + timedelta(minutes=30)
+            if update_fields is not None:
+                update_fields.add('payment_deadline')
             
         if self.olympiad.generate_unique_id and not self.unique_participant_id:
             is_paid_or_free = self.payment_status in [self.PaymentStatus.PAID, self.PaymentStatus.FREE] or self.olympiad.olympiad_type == 'online'
@@ -300,7 +306,12 @@ class Registration(models.Model):
                     new_id = f"{prefix}-{random.randint(100000, 999999)}"
                     if not Registration.objects.filter(unique_participant_id=new_id).exists():
                         self.unique_participant_id = new_id
+                        if update_fields is not None:
+                            update_fields.add('unique_participant_id')
                         break
+
+        if update_fields is not None:
+            kwargs['update_fields'] = list(update_fields)
 
         super().save(*args, **kwargs)
 
