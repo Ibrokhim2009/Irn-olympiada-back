@@ -19,13 +19,14 @@ from .serializers import (
     OlympiadSerializer, SubOlympiadSerializer, SubOlympiadGradeSerializer,
     QuestionSerializer, QuestionExamSerializer, RegistrationSerializer,
     TestSerializer, NotificationSerializer, RegionSerializer, ExamResultSerializer,
-    SupportTicketSerializer, TicketReplySerializer, EditRequestSerializer
+    SupportTicketSerializer, TicketReplySerializer, EditRequestSerializer,
+    BookSerializer
 )
 from .models import (
     User, Olympiad, SubOlympiad, SubOlympiadGrade,
     Registration, ExamResult, Test, Question,
     Notification, Region, SupportTicket, TicketReply,
-    SMSSentHistory, ClickTransactions, EditRequest
+    SMSSentHistory, ClickTransactions, EditRequest, Book
 )
 from .permissions import IsAdminUserOrReadOnly, IsAdminOrCoordinatorReadOnly
 from .utils_payme import get_payme_link
@@ -2176,4 +2177,22 @@ class EditRequestViewSet(viewsets.ModelViewSet):
         edit_req.save()
 
         return Response({'success': True, 'status': 'rejected'})
+
+
+class BookViewSet(viewsets.ModelViewSet):
+    queryset = Book.objects.all()
+    serializer_class = BookSerializer
+    permission_classes = (IsAdminUserOrReadOnly,)
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = ['book_type', 'is_active']
+    search_fields = ['title_uz', 'title_ru', 'title_en', 'description_uz', 'description_ru', 'description_en']
+
+    def get_queryset(self):
+        queryset = Book.objects.all()
+        user = self.request.user
+        is_staff = user and user.is_authenticated and (user.is_staff or user.role in ['admin', 'superadmin'])
+        if not is_staff:
+            queryset = queryset.filter(is_active=True)
+        return queryset
+
 

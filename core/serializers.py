@@ -3,7 +3,7 @@ from .models import (
     User, Olympiad, SubOlympiad, SubOlympiadGrade,
     Question, Test, Registration, ExamResult,
     Notification, Region, UserAchievement,
-    SupportTicket, TicketReply, EditRequest
+    SupportTicket, TicketReply, EditRequest, Book
 )
 import base64
 import uuid
@@ -523,3 +523,24 @@ class EditRequestSerializer(serializers.ModelSerializer):
             return f"{obj.reviewed_by.last_name} {obj.reviewed_by.first_name}".strip() or obj.reviewed_by.username
         except:
             return None
+
+
+class BookSerializer(serializers.ModelSerializer):
+    title = serializers.CharField(read_only=True)
+    description = serializers.CharField(read_only=True)
+    cover_image = Base64ImageField(required=False, allow_null=True)
+
+    class Meta:
+        model = Book
+        fields = ('id', 'title', 'description', 'title_uz', 'title_ru', 'title_en',
+                  'description_uz', 'description_ru', 'description_en',
+                  'book_type', 'price', 'cover_image', 'pdf_file', 'telegram_link',
+                  'is_active', 'created_at')
+
+    def to_representation(self, instance):
+        request = self.context.get('request')
+        lang = request.query_params.get('lang', 'uz') if request and hasattr(request, 'query_params') else 'uz'
+        result = super().to_representation(instance)
+        result['title'] = instance.get_translated('title', lang)
+        result['description'] = instance.get_translated('description', lang)
+        return result

@@ -543,3 +543,41 @@ class ClickTransactions(models.Model):
         return f"CLICK Transaction #{self.transaction_id} Registration: {self.registration_id} - {self.get_state_display()}"
 
 
+# ==================== КНИЖНЫЙ МАГАЗИН (КНИГИ) ====================
+class Book(models.Model):
+    class BookType(models.TextChoices):
+        FREE = 'free', 'Бесплатно'
+        PAID = 'paid', 'Платно'
+
+    title_uz = models.CharField(max_length=255, null=True, blank=True)
+    title_ru = models.CharField(max_length=255, null=True, blank=True)
+    title_en = models.CharField(max_length=255, null=True, blank=True)
+    description_uz = models.TextField(null=True, blank=True)
+    description_ru = models.TextField(null=True, blank=True)
+    description_en = models.TextField(null=True, blank=True)
+
+    book_type = models.CharField(max_length=10, choices=BookType.choices, default=BookType.FREE, db_index=True)
+    price = models.BigIntegerField(default=0, help_text="Цена в UZS (целое число)")
+    cover_image = models.ImageField(upload_to='books/covers/', null=True, blank=True)
+    pdf_file = models.FileField(upload_to='books/pdfs/', null=True, blank=True, help_text="Только для бесплатных книг")
+    telegram_link = models.URLField(max_length=500, null=True, blank=True, help_text="Ссылка на Telegram для покупки платных книг")
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Книга"
+        verbose_name_plural = "Книги"
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return self.title_ru or self.title_uz or self.title_en or f"Book #{self.pk}"
+
+    def get_translated(self, field, lang):
+        val = getattr(self, f"{field}_{lang}", None)
+        if val: return val
+        for l in ['uz', 'ru', 'en']:
+            val = getattr(self, f"{field}_{l}", None)
+            if val: return val
+        return ""
+
+

@@ -4,7 +4,7 @@ from .models import (
     User, Olympiad, SubOlympiad, SubOlympiadGrade, 
     Test, Question, Registration, ExamResult, 
     Notification, Region, SupportTicket, TicketReply, SMSSentHistory,
-    ClickTransactions, EditRequest
+    ClickTransactions, EditRequest, Book
 )
 
 @admin.register(User)
@@ -142,6 +142,13 @@ class EditRequestAdmin(admin.ModelAdmin):
     list_display = ('id', 'coordinator', 'target_type', 'target_id', 'status', 'created_at')
     list_filter = ('status', 'target_type', 'created_at')
     search_fields = ('coordinator__username', 'coordinator__first_name', 'coordinator__last_name', 'target_display')
+
+
+@admin.register(Book)
+class BookAdmin(admin.ModelAdmin):
+    list_display = ('id', 'title_ru', 'title_uz', 'title_en', 'book_type', 'price', 'is_active', 'created_at')
+    list_filter = ('book_type', 'is_active', 'created_at')
+    search_fields = ('title_ru', 'title_uz', 'title_en', 'description_ru', 'description_uz', 'description_en')
 
 
 
