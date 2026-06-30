@@ -6,7 +6,7 @@ import requests
 import django
 
 # Setup Django Environment
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'backend.settings')
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'src.settings')
 try:
     django.setup()
 except Exception as e:
