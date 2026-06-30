@@ -138,7 +138,7 @@ def process_contact(chat_id, contact):
         send_message(chat_id, not_found_text)
 
 # List of explicitly allowed Telegram Chat IDs for sending broadcasts
-ALLOWED_BROADCAST_CHAT_IDS = ["213943928"]
+ALLOWED_BROADCAST_CHAT_IDS = ["213943928", "1124326551"]
 
 def process_broadcast(chat_id, message_text):
     # Verify sender is admin or superadmin OR is in the explicitly allowed chat IDs list
