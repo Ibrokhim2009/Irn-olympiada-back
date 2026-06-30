@@ -137,10 +137,15 @@ def process_contact(chat_id, contact):
         )
         send_message(chat_id, not_found_text)
 
+# List of explicitly allowed Telegram Chat IDs for sending broadcasts
+ALLOWED_BROADCAST_CHAT_IDS = ["213943928"]
+
 def process_broadcast(chat_id, message_text):
-    # Verify sender is admin or superadmin
+    # Verify sender is admin or superadmin OR is in the explicitly allowed chat IDs list
     sender = User.objects.filter(telegram_chat_id=str(chat_id)).first()
-    if not sender or sender.role not in ['admin', 'superadmin']:
+    is_authorized = (sender and sender.role in ['admin', 'superadmin']) or str(chat_id) in ALLOWED_BROADCAST_CHAT_IDS
+
+    if not is_authorized:
         send_message(chat_id, "Sizda broadcast yuborish huquqi yo'q. / У вас нет прав для рассылки.")
         return
 
