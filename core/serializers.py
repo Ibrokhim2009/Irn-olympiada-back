@@ -529,6 +529,8 @@ class BookSerializer(serializers.ModelSerializer):
     title = serializers.CharField(read_only=True)
     description = serializers.CharField(read_only=True)
     cover_image = Base64ImageField(required=False, allow_null=True)
+    pdf_file = serializers.FileField(required=False, allow_null=True)
+    telegram_link = serializers.URLField(required=False, allow_null=True, allow_blank=True)
 
     class Meta:
         model = Book
