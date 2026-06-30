@@ -63,6 +63,7 @@ class User(AbstractUser):
     grade = models.CharField(max_length=5, null=True, blank=True)
     
     participant_id = models.CharField(max_length=20, unique=True, null=True, blank=True, db_index=True)
+    telegram_chat_id = models.CharField(max_length=100, null=True, blank=True, db_index=True)
     password_text = models.CharField(max_length=255, null=True, blank=True, help_text="Stored plain password for admin visibility")
 
     teacher_name = models.CharField(max_length=255, null=True, blank=True)

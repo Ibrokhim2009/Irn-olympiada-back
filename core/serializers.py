@@ -215,7 +215,7 @@ class UserSerializer(serializers.ModelSerializer):
         model = User
         fields = ('id', 'username', 'email', 'first_name', 'last_name', 'middle_name',
                   'phone', 'birth_date', 'region', 'school', 'grade', 'role', 'participant_id',
-                  'teacher_name', 'teacher_phone', 'teachers', 'password_text', 'password',
+                  'teacher_name', 'teacher_phone', 'teachers', 'password_text', 'telegram_chat_id', 'password',
                   'registrations', 'exam_results', 'notifications', 'achievements')
 
     def create(self, validated_data):
@@ -244,7 +244,7 @@ class UserListSerializer(serializers.ModelSerializer):
         model = User
         fields = ('id', 'username', 'email', 'first_name', 'last_name', 'middle_name',
                   'phone', 'birth_date', 'region', 'school', 'grade', 'role', 'participant_id',
-                  'teacher_name', 'teacher_phone', 'teachers', 'password_text',
+                  'teacher_name', 'teacher_phone', 'teachers', 'password_text', 'telegram_chat_id',
                   'registrations')
 
     
