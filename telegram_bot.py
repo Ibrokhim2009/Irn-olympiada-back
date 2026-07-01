@@ -47,9 +47,20 @@ def send_message(chat_id, text, reply_markup=None):
     if reply_markup:
         payload["reply_markup"] = reply_markup
     try:
-        requests.post(API_URL + "sendMessage", json=payload)
+        res = requests.post(API_URL + "sendMessage", json=payload)
+        return res.json().get("result", {}).get("message_id")
     except Exception as e:
         print(f"Error sending message to {chat_id}:", e)
+        return None
+
+def delete_message(chat_id, message_id):
+    """Delete a message by chat_id and message_id silently."""
+    if not message_id:
+        return
+    try:
+        requests.post(API_URL + "deleteMessage", json={"chat_id": chat_id, "message_id": message_id})
+    except Exception as e:
+        print(f"Error deleting message {message_id} in {chat_id}:", e)
 
 def get_keyboard():
     # Keyboard to request contact & book shop button
@@ -391,10 +402,13 @@ def process_state_message(chat_id, message, state):
             "resize_keyboard": True,
             "one_time_keyboard": True
         }
-        send_message(chat_id, checkout_text, reply_markup=cancel_markup)
+        # Save the checkout message_id so we can delete it after receipt is received
+        checkout_msg_id = send_message(chat_id, checkout_text, reply_markup=cancel_markup)
+        state["checkout_msg_id"] = checkout_msg_id
         
     elif current_state == "WAIT_FOR_RECEIPT":
         file_id = None
+        receipt_message_id = message.get("message_id")  # ID of user's receipt photo message
         if photo:
             file_id = photo[-1]["file_id"]
         elif document and document.get("mime_type", "").startswith("image/"):
@@ -439,7 +453,13 @@ def process_state_message(chat_id, message, state):
             filename = f"receipt_{uuid.uuid4().hex[:10]}.jpg"
             order.receipt_image.save(filename, ContentFile(img_res.content), save=True)
             
+            # Delete the checkout details message (card number etc.) for privacy
+            checkout_msg_id = state.get("checkout_msg_id")
             USER_STATES.pop(chat_id, None)
+            
+            # Delete both: the checkout order summary message + the user's receipt photo
+            delete_message(chat_id, checkout_msg_id)
+            delete_message(chat_id, receipt_message_id)
             
             success_msg = (
                 f"✅ <b>Rahmat! Buyurtmangiz qabul qilindi / Спасибо! Ваш заказ принят.</b>\n\n"
