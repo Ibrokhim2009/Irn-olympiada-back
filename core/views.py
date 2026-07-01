@@ -1167,16 +1167,26 @@ class AdminStatsView(APIView):
 
         oly_fill = []
         for oly in Olympiad.objects.all():
-            reg_count = oly.registrations.filter(payment_status__in=['paid', 'free']).count()
+            total_regs = oly.registrations.count()
+            paid_count = oly.registrations.filter(
+                models.Q(payment_status__in=['paid', 'free']) |
+                models.Q(olympiad__olympiad_type='online')
+            ).count()
+            unpaid_count = total_regs - paid_count
+            revenue = sum(r.price for r in oly.registrations.filter(payment_status='paid'))
+            paid_free_count = oly.registrations.filter(payment_status__in=['paid', 'free']).count()
             oly_fill.append({
                 'id': oly.id,
                 'title_uz': oly.title_uz,
                 'title_ru': oly.title_ru,
                 'title_en': oly.title_en,
-                'registered': reg_count,
+                'registered': total_regs,
+                'paid_count': paid_count,
+                'unpaid_count': unpaid_count,
                 'max': oly.max_participants,
-                'fill': round((reg_count / oly.max_participants * 100), 1) if oly.max_participants and oly.max_participants > 0 else 0,
-                'type': oly.olympiad_type
+                'fill': round((paid_free_count / oly.max_participants * 100), 1) if oly.max_participants and oly.max_participants > 0 else 0,
+                'type': oly.olympiad_type,
+                'revenue': revenue
             })
 
         from django.db.models.functions import TruncMonth
