@@ -597,6 +597,7 @@ class BookOrder(models.Model):
     delivery_address = models.TextField()
     receipt_image = models.ImageField(upload_to='receipts/', null=True, blank=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    rejection_reason = models.TextField(null=True, blank=True)
     
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

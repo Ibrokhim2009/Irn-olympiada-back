@@ -1,5 +1,6 @@
 import hashlib
 import logging
+import requests
 from django.conf import settings
 from django.db import models
 from django.shortcuts import get_object_or_404
@@ -2291,6 +2292,8 @@ class BookOrderViewSet(viewsets.ModelViewSet):
             return Response({'error': 'Invalid status'}, status=400)
 
         order.status = new_status
+        if new_status == 'rejected' and rejection_reason:
+            order.rejection_reason = rejection_reason
         order.save()
 
         # Send telegram notification
