@@ -2269,9 +2269,17 @@ class TelegramBroadcastView(APIView):
 class BookOrderViewSet(viewsets.ModelViewSet):
     queryset = BookOrder.objects.all().select_related('user', 'book')
     serializer_class = BookOrderSerializer
-    permission_classes = (permissions.IsAdminUser,)
+    permission_classes = (permissions.IsAuthenticated,)
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ['status', 'user', 'book']
+
+    def get_queryset(self):
+        user = self.request.user
+        if not user or not user.is_authenticated:
+            return BookOrder.objects.none()
+        if user.is_staff or user.role in ['admin', 'superadmin']:
+            return BookOrder.objects.all().select_related('user', 'book')
+        return BookOrder.objects.filter(user=user).select_related('user', 'book')
 
     @action(detail=True, methods=['post'])
     def update_status(self, request, pk=None):
