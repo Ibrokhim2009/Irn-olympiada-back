@@ -582,3 +582,32 @@ class Book(models.Model):
         return ""
 
 
+class BookOrder(models.Model):
+    class Status(models.TextChoices):
+        PENDING = 'pending', 'Ожидает проверки'
+        ACCEPTED = 'accepted', 'Оплата принята'
+        REJECTED = 'rejected', 'Отклонено'
+        DELIVERING = 'delivering', 'Доставляется'
+        DELIVERED = 'delivered', 'Доставлено'
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='book_orders')
+    book = models.ForeignKey(Book, on_delete=models.CASCADE, related_name='orders')
+    amount = models.PositiveIntegerField(default=1)
+    total_price = models.BigIntegerField()
+    delivery_address = models.TextField()
+    receipt_image = models.ImageField(upload_to='receipts/', null=True, blank=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Заказ книги"
+        verbose_name_plural = "Заказы книг"
+        ordering = ['-created_at']
+
+    def __str__(self):
+        book_title = self.book.title_ru or self.book.title_uz or self.book.title_en or 'Unknown Book'
+        return f"Order #{self.id} - {self.user.username} - {book_title} ({self.amount} шт.)"
+
+

@@ -19,7 +19,8 @@ from .views import (
     AdminStatsView, RegionViewSet, ExamResultViewSet,
     SupportTicketViewSet, TicketReplyViewSet,
     SMSTemplateView, SMSSendView, SMSBalanceView, SMSSentHistoryView,
-    TelegramWebhookView, EditRequestViewSet, BookViewSet
+    TelegramWebhookView, EditRequestViewSet, BookViewSet,
+    TelegramUsersListView, TelegramBroadcastView, BookOrderViewSet
 )
 
 schema_view = get_schema_view(
@@ -48,6 +49,7 @@ router.register(r'support/tickets', SupportTicketViewSet, basename='support-tick
 router.register(r'support/replies', TicketReplyViewSet, basename='support-replies')
 router.register(r'edit-requests', EditRequestViewSet, basename='edit-requests')
 router.register(r'books', BookViewSet, basename='books')
+router.register(r'book-orders', BookOrderViewSet, basename='book-orders')
 
 urlpatterns = [
     path('auth/register/', RegisterView.as_view(), name='register'),
@@ -59,6 +61,9 @@ urlpatterns = [
     path('notifications/seed/', SeedNotificationsView.as_view(), name='notifications-seed'),
     path('notifications/send/', SendNotificationView.as_view(), name='notifications-send'),
     path('admin/stats/', AdminStatsView.as_view(), name='admin-stats'),
+
+    path('telegram/users/', TelegramUsersListView.as_view(), name='telegram-users'),
+    path('telegram/broadcast/', TelegramBroadcastView.as_view(), name='telegram-broadcast'),
 
     path('', include(router.urls)),
 

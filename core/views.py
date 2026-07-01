@@ -20,13 +20,13 @@ from .serializers import (
     QuestionSerializer, QuestionExamSerializer, RegistrationSerializer,
     TestSerializer, NotificationSerializer, RegionSerializer, ExamResultSerializer,
     SupportTicketSerializer, TicketReplySerializer, EditRequestSerializer,
-    BookSerializer
+    BookSerializer, BookOrderSerializer
 )
 from .models import (
     User, Olympiad, SubOlympiad, SubOlympiadGrade,
     Registration, ExamResult, Test, Question,
     Notification, Region, SupportTicket, TicketReply,
-    SMSSentHistory, ClickTransactions, EditRequest, Book
+    SMSSentHistory, ClickTransactions, EditRequest, Book, BookOrder
 )
 from .permissions import IsAdminUserOrReadOnly, IsAdminOrCoordinatorReadOnly
 from .utils_payme import get_payme_link
@@ -2222,5 +2222,118 @@ class BookViewSet(viewsets.ModelViewSet):
         if not is_staff:
             queryset = queryset.filter(is_active=True)
         return queryset
+
+
+class TelegramUsersListView(APIView):
+    permission_classes = (permissions.IsAdminUser,)
+
+    def get(self, request):
+        users = User.objects.filter(telegram_chat_id__isnull=False).exclude(telegram_chat_id='')
+        serializer = UserSerializer(users, many=True, context={'request': request})
+        return Response(serializer.data)
+
+
+class TelegramBroadcastView(APIView):
+    permission_classes = (permissions.IsAdminUser,)
+
+    def post(self, request):
+        message = request.data.get('message', '').strip()
+        if not message:
+            return Response({'error': 'Message is required'}, status=400)
+
+        users = User.objects.filter(telegram_chat_id__isnull=False).exclude(telegram_chat_id='')
+        success_count = 0
+        total = users.count()
+
+        for u in users:
+            BOT_TOKEN = "7361972097:AAFOiy-yKvejKL_nG4r9b7ecmj6TzJC655A"
+            url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+            payload = {
+                "chat_id": u.telegram_chat_id,
+                "text": message,
+                "parse_mode": "HTML"
+            }
+            try:
+                res = requests.post(url, json=payload, timeout=5)
+                if res.status_code == 200:
+                    success_count += 1
+            except Exception:
+                pass
+
+        return Response({
+            'success': True,
+            'message': f'Broadcast complete. Sent to {success_count} of {total} users.'
+        })
+
+
+class BookOrderViewSet(viewsets.ModelViewSet):
+    queryset = BookOrder.objects.all().select_related('user', 'book')
+    serializer_class = BookOrderSerializer
+    permission_classes = (permissions.IsAdminUser,)
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['status', 'user', 'book']
+
+    @action(detail=True, methods=['post'])
+    def update_status(self, request, pk=None):
+        order = self.get_object()
+        new_status = request.data.get('status')
+        rejection_reason = request.data.get('rejection_reason', '')
+
+        if not new_status or new_status not in BookOrder.Status.values:
+            return Response({'error': 'Invalid status'}, status=400)
+
+        order.status = new_status
+        order.save()
+
+        # Send telegram notification
+        chat_id = order.user.telegram_chat_id
+        if chat_id:
+            book_title = order.book.title_ru or order.book.title_uz or order.book.title_en or 'Unknown Book'
+            if new_status == BookOrder.Status.ACCEPTED:
+                text = (
+                    f"✅ <b>To'lovingiz qabul qilindi! / Ваша оплата принята!</b>\n\n"
+                    f"📖 Kitob: {book_title}\n"
+                    f"🔢 Soni: {order.amount} ta\n"
+                    f"📦 Buyurtma holati: To'lov tasdiqlandi. Tez orada kitobingiz yetkazib beriladi.\n\n"
+                    f"Статус заказа: Оплата подтверждена. Книга скоро будет доставлена."
+                )
+            elif new_status == BookOrder.Status.REJECTED:
+                reason_str = f"Sababi: {rejection_reason}" if rejection_reason else "Sababi ko'rsatilmadi"
+                reason_str_ru = f"Причина: {rejection_reason}" if rejection_reason else "Причина не указана"
+                text = (
+                    f"❌ <b>Buyurtmangiz rad etildi / Ваш заказ отклонен.</b>\n\n"
+                    f"📖 Kitob: {book_title}\n"
+                    f"⚠️ {reason_str}\n"
+                    f"⚠️ {reason_str_ru}"
+                )
+            elif new_status == BookOrder.Status.DELIVERING:
+                text = (
+                    f"🚚 <b>Kitobingiz yo'lga chiqdi! / Ваша книга в пути!</b>\n\n"
+                    f"📖 Kitob: {book_title}\n"
+                    f"📦 Buyurtma holati: Yetkazib berish boshlandi.\n\n"
+                    f"Статус заказа: Книга отправлена и находится в пути."
+                )
+            elif new_status == BookOrder.Status.DELIVERED:
+                text = (
+                    f"🎉 <b>Kitob muvaffaqiyatli etkazib berildi! / Книга успешно доставлена!</b>\n\n"
+                    f"📖 Kitob: {book_title}\n"
+                    f"Rahmat, bizni tanlaganingiz uchun! / Спасибо, что выбрали нас!"
+                )
+            else:
+                text = f"📦 Buyurtma holati o'zgardi: {new_status} / Статус заказа изменен: {new_status}"
+
+            BOT_TOKEN = "7361972097:AAFOiy-yKvejKL_nG4r9b7ecmj6TzJC655A"
+            url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+            payload = {
+                "chat_id": chat_id,
+                "text": text,
+                "parse_mode": "HTML"
+            }
+            try:
+                requests.post(url, json=payload, timeout=5)
+            except Exception:
+                pass
+
+        return Response({'success': True, 'status': order.status})
 
 

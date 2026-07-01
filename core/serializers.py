@@ -3,7 +3,7 @@ from .models import (
     User, Olympiad, SubOlympiad, SubOlympiadGrade,
     Question, Test, Registration, ExamResult,
     Notification, Region, UserAchievement,
-    SupportTicket, TicketReply, EditRequest, Book
+    SupportTicket, TicketReply, EditRequest, Book, BookOrder
 )
 import base64
 import uuid
@@ -546,3 +546,22 @@ class BookSerializer(serializers.ModelSerializer):
         result['title'] = instance.get_translated('title', lang)
         result['description'] = instance.get_translated('description', lang)
         return result
+
+
+class BookOrderSerializer(serializers.ModelSerializer):
+    user_name = serializers.SerializerMethodField()
+    user_phone = serializers.ReadOnlyField(source='user.phone')
+    book_title_ru = serializers.ReadOnlyField(source='book.title_ru')
+    book_title_uz = serializers.ReadOnlyField(source='book.title_uz')
+    book_title_en = serializers.ReadOnlyField(source='book.title_en')
+
+    class Meta:
+        model = BookOrder
+        fields = ('id', 'user', 'user_name', 'user_phone', 'book', 'book_title_ru', 'book_title_uz', 'book_title_en',
+                  'amount', 'total_price', 'delivery_address', 'receipt_image', 'status', 'created_at', 'updated_at')
+
+    def get_user_name(self, obj):
+        try:
+            return f"{obj.user.last_name} {obj.user.first_name}".strip() or obj.user.username
+        except:
+            return obj.user.username
