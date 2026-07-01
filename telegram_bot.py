@@ -202,39 +202,68 @@ def process_books(chat_id):
     send_message(chat_id, "📚 <b>Bizning kitoblarimiz / Наши книги:</b>\nTanlang / Выберите:")
     
     for book in books:
-        title = book.title_uz or book.title_ru or book.title_en
-        desc = book.description_uz or book.description_ru or book.description_en or ""
-        text = (
-            f"📖 <b>{title}</b>\n\n"
-            f"📝 {desc}\n\n"
-            f"💰 <b>Narxi / Цена:</b> {book.price:,} UZS"
-        )
-        
-        reply_markup = {
-            "inline_keyboard": [
-                [{"text": "Sotib olish / Купить", "callback_data": f"buy_book:{book.id}"}]
-            ]
-        }
-        
-        if book.cover_image:
-            try:
-                img_path = book.cover_image.path
-                if os.path.exists(img_path):
-                    with open(img_path, 'rb') as f:
+        try:
+            title = book.title_uz or book.title_ru or book.title_en or 'Book'
+            desc = book.description_uz or book.description_ru or book.description_en or ""
+            price_val = book.price or 0
+            text = (
+                f"📖 <b>{title}</b>\n\n"
+                f"📝 {desc}\n\n"
+                f"💰 <b>Narxi / Цена:</b> {price_val:,} UZS"
+            )
+            
+            reply_markup = {
+                "inline_keyboard": [
+                    [{"text": "Sotib olish / Купить", "callback_data": f"buy_book:{book.id}"}]
+                ]
+            }
+            
+            sent_photo = False
+            if book.cover_image:
+                # Method A: Try sending photo via local file upload
+                try:
+                    img_path = book.cover_image.path
+                    if os.path.exists(img_path):
+                        with open(img_path, 'rb') as f:
+                            payload = {
+                                "chat_id": chat_id,
+                                "caption": text,
+                                "parse_mode": "HTML",
+                                "reply_markup": reply_markup
+                            }
+                            files = {"photo": f}
+                            res = requests.post(API_URL + "sendPhoto", data=payload, files=files)
+                            if res.status_code == 200:
+                                sent_photo = True
+                except Exception as e:
+                    print(f"Failed local path upload for book {book.id}: {e}")
+                    
+                # Method B: Try sending photo via public URL
+                if not sent_photo:
+                    try:
+                        public_url = "https://x8k2m9f3.irnolympiad.uz" + book.cover_image.url
                         payload = {
                             "chat_id": chat_id,
+                            "photo": public_url,
                             "caption": text,
                             "parse_mode": "HTML",
                             "reply_markup": reply_markup
                         }
-                        files = {"photo": f}
-                        requests.post(API_URL + "sendPhoto", data=payload, files=files)
-                        continue
-            except Exception as e:
-                print("Failed to send book cover photo, sending text instead:", e)
+                        res = requests.post(API_URL + "sendPhoto", json=payload)
+                        if res.status_code == 200:
+                            sent_photo = True
+                    except Exception as e:
+                        print(f"Failed public URL send for book {book.id}: {e}")
+                        
+            if sent_photo:
+                time.sleep(0.2)
+                continue
                 
-        send_message(chat_id, text, reply_markup=reply_markup)
-        time.sleep(0.2)
+            # Fallback to text message if photo could not be sent or cover_image is missing
+            send_message(chat_id, text, reply_markup=reply_markup)
+            time.sleep(0.2)
+        except Exception as err:
+            print(f"Error rendering book {book.id}: {err}")
 
 def process_callback_query(callback_query):
     query_id = callback_query["id"]
