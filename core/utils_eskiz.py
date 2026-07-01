@@ -11,6 +11,31 @@ ESKIZ_EMAIL = env.str("ESKIZ_EMAIL", "")
 ESKIZ_PASSWORD = env.str("ESKIZ_PASSWORD", "")
 ESKIZ_BASE_URL = "https://notify.eskiz.uz/api/"
 
+def format_eskiz_error(status_code, response_text):
+    try:
+        import json
+        data = json.loads(response_text)
+        msg = data.get('message') or data.get('error') or data.get('error_description')
+        if msg:
+            if isinstance(msg, dict):
+                # Format dictionary as "key: error1, error2"
+                parts = []
+                for k, v in msg.items():
+                    if isinstance(v, list):
+                        parts.append(f"{k}: {', '.join(map(str, v))}")
+                    else:
+                        parts.append(f"{k}: {v}")
+                return "; ".join(parts)
+            elif isinstance(msg, list):
+                return ", ".join(map(str, msg))
+            return str(msg)
+    except Exception:
+        pass
+    
+    if response_text and len(response_text) < 150:
+        return f"Eskiz API Error {status_code}: {response_text}"
+    return f"Eskiz API Error: {status_code}"
+
 def get_eskiz_token():
     token = cache.get("eskiz_token")
     if token:
@@ -54,7 +79,13 @@ def send_sms(mobile_phone, message, from_name="4546"):
     try:
         response = requests.post(url, data=payload, headers=headers)
         print(f"Eskiz send SMS response to {phone}: {response.text}")
-        return response.json()
+        if response.status_code == 401:
+            cache.delete("eskiz_token")
+        if response.status_code in [200, 201]:
+            return response.json()
+        else:
+            error_msg = format_eskiz_error(response.status_code, response.text)
+            return {"status": "error", "message": error_msg}
     except Exception as e:
         print(f"Eskiz send SMS error: {e}")
         return {"status": "error", "message": str(e)}
@@ -83,6 +114,9 @@ def get_templates():
             url = f"{ESKIZ_BASE_URL}{ep}"
             response = requests.get(url, headers=headers)
             print(f"Eskiz GET {ep} status code: {response.status_code}")
+            if response.status_code == 401:
+                cache.delete("eskiz_token")
+                break
             if response.status_code == 200:
                 data = response.json()
                 print(f"Eskiz GET {ep} response: {data}")
@@ -146,10 +180,15 @@ def add_template(name, text):
         print(f"Eskiz POST user/template status code: {response.status_code}")
         print(f"Eskiz POST user/template response text: {response.text}")
         
+        if response.status_code == 401:
+            cache.delete("eskiz_token")
+        
         # Fallback to other endpoints if the main one fails with 404
         if response.status_code == 404:
             url = f"{ESKIZ_BASE_URL}template"
             response = requests.post(url, data={'name': name, 'text': text}, headers=headers)
+            if response.status_code == 401:
+                cache.delete("eskiz_token")
             
         if response.status_code in [200, 201]:
             try:
@@ -157,17 +196,11 @@ def add_template(name, text):
             except Exception:
                 return {"status": "success", "message": "Template created successfully"}
         else:
-            try:
-                data = response.json()
-                return {
-                    "status": "error",
-                    "message": data.get('message', f"Eskiz API Error: {response.status_code}")
-                }
-            except Exception:
-                return {
-                    "status": "error",
-                    "message": f"Eskiz API Error: {response.status_code}"
-                }
+            error_msg = format_eskiz_error(response.status_code, response.text)
+            return {
+                "status": "error",
+                "message": error_msg
+            }
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
@@ -183,20 +216,16 @@ def delete_template(template_id):
         response = requests.delete(url, headers=headers)
         print(f"Eskiz DELETE user/template/{template_id} status code: {response.status_code}")
         print(f"Eskiz DELETE user/template/{template_id} response: {response.text}")
+        if response.status_code == 401:
+            cache.delete("eskiz_token")
         if response.status_code in [200, 201]:
             return {"status": "success", "message": "Template deleted successfully"}
         else:
-            try:
-                data = response.json()
-                return {
-                    "status": "error",
-                    "message": data.get('message', f"Eskiz API Error: {response.status_code}")
-                }
-            except Exception:
-                return {
-                    "status": "error",
-                    "message": f"Eskiz API Error: {response.status_code}"
-                }
+            error_msg = format_eskiz_error(response.status_code, response.text)
+            return {
+                "status": "error",
+                "message": error_msg
+            }
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
@@ -220,11 +249,18 @@ def get_balance():
         "user",
     ]
 
+    last_error = "Could not retrieve balance from Eskiz API"
+
     for ep in endpoints_to_try:
         try:
             url = f"{ESKIZ_BASE_URL}{ep}"
             response = requests.get(url, headers=headers)
             print(f"Eskiz GET {ep} status: {response.status_code}, body: {response.text[:300]}")
+
+            if response.status_code == 401:
+                cache.delete("eskiz_token")
+                last_error = format_eskiz_error(response.status_code, response.text)
+                break
 
             if response.status_code == 200:
                 data = response.json()
@@ -244,10 +280,13 @@ def get_balance():
 
                 if balance is not None:
                     return {"status": "success", "balance": balance}
+            else:
+                last_error = format_eskiz_error(response.status_code, response.text)
 
         except Exception as e:
+            last_error = str(e)
             print(f"Eskiz get_balance error for {ep}: {e}")
             continue
 
-    return {"status": "error", "message": "Could not retrieve balance from Eskiz API"}
+    return {"status": "error", "message": last_error}
 
