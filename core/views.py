@@ -1459,6 +1459,7 @@ class PersonalResultsListView(APIView):
                 'grade': res.sub_olympiad_grade.grade if res.sub_olympiad_grade else None,
                 'score': res.score,
                 'completed_at': res.completed_at,
+                'mistakes': res.mistakes or [],
             })
 
         return Response(data)
@@ -1735,20 +1736,20 @@ class ExamResultViewSet(viewsets.ModelViewSet):
             else:
                 test = getattr(result.olympiad, 'test', None)
             
-            if not test:
-                return Response({'error': 'Test not found'}, status=404)
-            
             questions = []
-            for q in test.questions.all().order_by('id'):
-                questions.append({
-                    'id': q.id,
-                    'text_ru': q.text_ru,
-                    'text_uz': q.text_uz,
-                    'text_en': q.text_en,
-                    'options': q.options,
-                    'correct_option': str(q.correct_option) if q.correct_option is not None else None,
-                    'image': request.build_absolute_uri(q.image.url) if q.image else None
-                })
+            has_test = False
+            if test:
+                has_test = True
+                for q in test.questions.all().order_by('id'):
+                    questions.append({
+                        'id': q.id,
+                        'text_ru': q.text_ru,
+                        'text_uz': q.text_uz,
+                        'text_en': q.text_en,
+                        'options': q.options,
+                        'correct_option': str(q.correct_option) if q.correct_option is not None else None,
+                        'image': request.build_absolute_uri(q.image.url) if q.image else None
+                    })
             
             # Convert keys in answers to strings for consistency
             user_answers = result.answers_json or {}
@@ -1759,13 +1760,30 @@ class ExamResultViewSet(viewsets.ModelViewSet):
                 'user_name': f"{result.user.last_name} {result.user.first_name}",
                 'answers': formatted_answers,
                 'score': result.score,
-                'questions': questions
+                'questions': questions,
+                'mistakes': result.mistakes or [],
+                'has_test': has_test
             })
 
         # POST method
+        if 'mistakes' in request.data:
+            new_mistakes = request.data.get('mistakes', [])
+            result.mistakes = new_mistakes
+            
+            # Recalculate score based on mistakes
+            total_deducted = 0
+            for m in new_mistakes:
+                try:
+                    total_deducted += int(m.get('minus_points', 0))
+                except (ValueError, TypeError):
+                    pass
+            result.score = max(0, 100 - total_deducted)
+            result.save()
+            return Response({'success': True, 'score': result.score})
+
         new_answers = request.data.get('answers')
         if new_answers is None:
-            return Response({'error': 'Answers are required'}, status=400)
+            return Response({'error': 'Answers or mistakes are required'}, status=400)
             
         result.answers_json = new_answers
         

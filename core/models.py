@@ -341,9 +341,9 @@ class ExamResult(models.Model):
     sub_olympiad_grade = models.ForeignKey(SubOlympiadGrade, on_delete=models.CASCADE, related_name='exam_results', null=True, blank=True)
     # sub_olympiad — оставлен для обратной совместимости
     sub_olympiad = models.ForeignKey(SubOlympiad, on_delete=models.CASCADE, related_name='exam_results', null=True, blank=True)
-    
     score = models.PositiveIntegerField(null=True, blank=True)
     answers_json = models.JSONField(null=True, blank=True, help_text="Сырые ответы пользователя для анализа")
+    mistakes = models.JSONField(default=list, blank=True, help_text="Список ошибок: [{'question_number': '5', 'user_answer': 'A', 'correct_answer': 'B', 'minus_points': 6}]")
     tab_switches = models.PositiveIntegerField(default=0, help_text="Количество переключений вкладок")
     
     start_time = models.DateTimeField(default=timezone.now)
