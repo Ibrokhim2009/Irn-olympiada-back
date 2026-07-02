@@ -148,15 +148,15 @@ def get_templates():
             'text': 'Bu Eskiz dan test',
             'status': 'approved',
             'created_at': now_iso,
-            'note': 'Встроенный тестовый шаблон (для тест-аккаунтов)',
+            'note': 'Tizim shabloni (uz)',
             'type': 'service'
         },
         {
             'id': 'test_ru',
-            'text': 'Это тест от Eskiz',
+            'text': 'Test ot Eskiz',
             'status': 'approved',
             'created_at': now_iso,
-            'note': 'Встроенный тестовый шаблон (для тест-аккаунтов)',
+            'note': 'Sistemnyj shablon (ru)',
             'type': 'service'
         },
         {
@@ -164,16 +164,11 @@ def get_templates():
             'text': 'This is test from Eskiz',
             'status': 'approved',
             'created_at': now_iso,
-            'note': 'Встроенный тестовый шаблон (для тест-аккаунтов)',
+            'note': 'System template (en)',
             'type': 'service'
         }
     ]
     all_templates.extend(local_templates)
-    return all_templates�он (для тест-аккаунтов)',
-            'type': 'service'
-        }
-    ])
-            
     return all_templates
 
 
