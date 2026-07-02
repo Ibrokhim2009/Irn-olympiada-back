@@ -12,6 +12,12 @@ ESKIZ_PASSWORD = env.str("ESKIZ_PASSWORD", "")
 ESKIZ_BASE_URL = "https://notify.eskiz.uz/api/"
 ESKIZ_TOKEN_CACHE_KEY = f"eskiz_token_{ESKIZ_EMAIL}"
 
+def get_eskiz_headers(token):
+    return {
+        'Authorization': f'Bearer {token}',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
+
 def format_eskiz_error(status_code, response_text):
     try:
         import json
@@ -92,9 +98,7 @@ def send_sms(mobile_phone, message, from_name="4546"):
         'message': message,
         'from': from_name,
     }
-    headers = {
-        'Authorization': f'Bearer {token}'
-    }
+    headers = get_eskiz_headers(token)
     
     try:
         response = requests.post(url, data=payload, headers=headers)
@@ -121,7 +125,7 @@ def get_templates():
     # 3. 'template' (fallback)
     # 4. 'message/sms/template' (fallback)
     endpoints = ["user/templates", "user/template", "template", "message/sms/template"]
-    headers = { 'Authorization': f'Bearer {token}' }
+    headers = get_eskiz_headers(token)
     
     all_templates = []
     now_iso = datetime.datetime.utcnow().isoformat() + 'Z'
@@ -220,7 +224,7 @@ def get_templates_debug():
         return {"error": "Failed to get Eskiz token"}
     
     endpoints = ["user/templates", "user/template", "template", "message/sms/template"]
-    headers = { 'Authorization': f'Bearer {token}' }
+    headers = get_eskiz_headers(token)
     
     results = {}
     for ep in endpoints:
@@ -238,6 +242,23 @@ def get_templates_debug():
     return results
 
 
+def add_template_debug(text):
+    token = get_eskiz_token()
+    if not token:
+        return {"error": "Failed to get Eskiz token"}
+    url = f"{ESKIZ_BASE_URL}user/template"
+    payload = { 'template': text }
+    headers = get_eskiz_headers(token)
+    try:
+        response = requests.post(url, data=payload, headers=headers, timeout=10)
+        return {
+            "status_code": response.status_code,
+            "body": response.text[:2000]
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
 def add_template(name, text):
     token = get_eskiz_token()
     if not token:
@@ -247,7 +268,7 @@ def add_template(name, text):
     url = f"{ESKIZ_BASE_URL}user/template"
     # Payload key MUST be 'template', not 'text' or 'name'
     payload = { 'template': text }
-    headers = { 'Authorization': f'Bearer {token}' }
+    headers = get_eskiz_headers(token)
     
     try:
         response = requests.post(url, data=payload, headers=headers)
@@ -284,7 +305,7 @@ def delete_template(template_id):
         return {"status": "error", "message": "No token"}
     
     url = f"{ESKIZ_BASE_URL}user/template/{template_id}"
-    headers = { 'Authorization': f'Bearer {token}' }
+    headers = get_eskiz_headers(token)
     
     try:
         response = requests.delete(url, headers=headers)
@@ -314,7 +335,7 @@ def get_balance():
     if not token:
         return {"status": "error", "message": "Failed to get Eskiz token"}
 
-    headers = {'Authorization': f'Bearer {token}'}
+    headers = get_eskiz_headers(token)
 
     # Eskiz documents 'user/get-limit' as the balance/limit endpoint
     endpoints_to_try = [
