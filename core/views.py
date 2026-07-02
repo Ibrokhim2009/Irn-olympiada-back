@@ -1867,6 +1867,9 @@ class SMSTemplateView(APIView):
         if request.query_params.get('debug_add') == '1':
             text = request.query_params.get('text', 'Bu Eskiz dan test')
             return Response(add_template_debug(text))
+        if request.query_params.get('debug_env') == '1':
+            from .utils_eskiz import ESKIZ_EMAIL
+            return Response({"ESKIZ_EMAIL": ESKIZ_EMAIL})
         templates = get_templates()
         return Response(templates)
 
