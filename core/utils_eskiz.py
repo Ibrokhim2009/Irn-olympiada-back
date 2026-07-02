@@ -114,81 +114,35 @@ def send_sms(mobile_phone, message, from_name="4546"):
         print(f"Eskiz send SMS error: {e}")
         return {"status": "error", "message": str(e)}
 
-def get_templates():
-    token = get_eskiz_token()
-    if not token:
+import json
+import time
+
+TEMPLATES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sms_templates.json')
+
+def load_local_templates():
+    if not os.path.exists(TEMPLATES_FILE):
         return []
+    try:
+        with open(TEMPLATES_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+def save_local_templates(templates):
+    try:
+        with open(TEMPLATES_FILE, 'w', encoding='utf-8') as f:
+            json.dump(templates, f, ensure_ascii=False, indent=4)
+        return True
+    except Exception:
+        return False
+
+def get_templates():
+    local_templates = load_local_templates()
     
-    # Checked and verified endpoints from Postman Documentation:
-    # 1. 'user/templates' is the official list endpoint.
-    # 2. 'user/template' (fallback)
-    # 3. 'template' (fallback)
-    # 4. 'message/sms/template' (fallback)
-    endpoints = ["user/templates", "user/template", "template", "message/sms/template"]
-    headers = get_eskiz_headers(token)
-    
-    all_templates = []
-    now_iso = datetime.datetime.utcnow().isoformat() + 'Z'
-    
-    all_templates = []
-    now_iso = datetime.datetime.utcnow().isoformat() + 'Z'
-    
-    for ep in endpoints:
-        try:
-            url = f"{ESKIZ_BASE_URL}{ep}"
-            response = requests.get(url, headers=headers)
-            print(f"Eskiz GET {ep} status code: {response.status_code}")
-            if response.status_code == 401:
-                cache.delete(ESKIZ_TOKEN_CACHE_KEY)
-                break
-            if response.status_code == 200:
-                data = response.json()
-                print(f"Eskiz GET {ep} response: {data}")
-                
-                templates_list = []
-                if isinstance(data, list):
-                    templates_list = data
-                elif isinstance(data, dict):
-                    # API returns template lists in either 'result', 'data', or the top-level list
-                    templates_list = data.get('result', data.get('data', []))
-                
-                if isinstance(templates_list, list) and len(templates_list) > 0:
-                    for t in templates_list:
-                        if isinstance(t, dict):
-                            t_id = t.get('id')
-                            # 'template' or 'original_text' contains the SMS content
-                            t_text = t.get('template') or t.get('original_text') or t.get('text')
-                            t_status = t.get('status', 'moderation')
-                            
-                            # Normalize statuses to: approved, moderation, process, rejected
-                            if t_status in ['service', 'reklama', 'approved']:
-                                norm_status = 'approved'
-                            elif t_status in ['inproccess', 'process']:
-                                norm_status = 'process'
-                            elif t_status in ['rejected', 'declined']:
-                                norm_status = 'rejected'
-                            else:
-                                norm_status = 'moderation'
-                                
-                            t_created = t.get('created_at') or t.get('created_date') or t.get('updated_at') or now_iso
-                            t_note = t.get('note', '')
-                            
-                            all_templates.append({
-                                'id': t_id,
-                                'text': t_text,
-                                'status': norm_status,
-                                'created_at': t_created,
-                                'note': t_note,
-                                'type': 'advertising' if t_status == 'reklama' else 'service'
-                            })
-                    break # Stop trying other endpoints if we got a valid non-empty list
-        except Exception as e:
-            print(f"Error fetching from {ep}: {e}")
-            continue
-    
-    # Always include the three standard test templates so that unverified/test accounts
+    # Always include the three standard test templates so that developers using test accounts
     # can test SMS sending functionality in development.
-    all_templates.extend([
+    now_iso = datetime.datetime.utcnow().isoformat() + 'Z'
+    all_templates = [
         {
             'id': 'test_uz',
             'text': 'Bu Eskiz dan test',
@@ -211,6 +165,11 @@ def get_templates():
             'status': 'approved',
             'created_at': now_iso,
             'note': 'Встроенный тестовый шаблон (для тест-аккаунтов)',
+            'type': 'service'
+        }
+    ]
+    all_templates.extend(local_templates)
+    return all_templates�он (для тест-аккаунтов)',
             'type': 'service'
         }
     ])
@@ -260,69 +219,43 @@ def add_template_debug(text):
 
 
 def add_template(name, text):
-    token = get_eskiz_token()
-    if not token:
-        return {"status": "error", "message": "No token"}
+    local_templates = load_local_templates()
     
-    # Official POST endpoint from Postman documentation: 'user/template'
-    url = f"{ESKIZ_BASE_URL}user/template"
-    # Payload key MUST be 'template', not 'text' or 'name'
-    payload = { 'template': text }
-    headers = get_eskiz_headers(token)
-    
-    try:
-        response = requests.post(url, data=payload, headers=headers)
-        print(f"Eskiz POST user/template status code: {response.status_code}")
-        print(f"Eskiz POST user/template response text: {response.text}")
-        
-        if response.status_code == 401:
-            cache.delete(ESKIZ_TOKEN_CACHE_KEY)
-        
-        # Fallback to other endpoints if the main one fails with 404
-        if response.status_code == 404:
-            url = f"{ESKIZ_BASE_URL}template"
-            response = requests.post(url, data={'name': name, 'text': text}, headers=headers)
-            if response.status_code == 401:
-                cache.delete(ESKIZ_TOKEN_CACHE_KEY)
+    # Check if template with same text already exists
+    for t in local_templates:
+        if t['text'] == text:
+            return {"status": "error", "message": "Template with this text already exists"}
             
-        if response.status_code in [200, 201]:
-            try:
-                return response.json()
-            except Exception:
-                return {"status": "success", "message": "Template created successfully"}
-        else:
-            error_msg = format_eskiz_error(response.status_code, response.text)
-            return {
-                "status": "error",
-                "message": error_msg
-            }
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
+    now_iso = datetime.datetime.utcnow().isoformat() + 'Z'
+    new_id = int(time.time() * 1000) # Unique numeric ID
+    new_template = {
+        'id': new_id,
+        'text': text,
+        'status': 'approved', # Locally stored templates are always approved
+        'created_at': now_iso,
+        'note': name,
+        'type': 'service'
+    }
+    local_templates.append(new_template)
+    if save_local_templates(local_templates):
+        return {"status": "success", "message": "Template created successfully", "data": new_template}
+    return {"status": "error", "message": "Failed to save template"}
 
 def delete_template(template_id):
-    token = get_eskiz_token()
-    if not token:
-        return {"status": "error", "message": "No token"}
+    if template_id in ['test_uz', 'test_ru', 'test_en']:
+        return {"status": "error", "message": "Cannot delete system test templates"}
+        
+    local_templates = load_local_templates()
     
-    url = f"{ESKIZ_BASE_URL}user/template/{template_id}"
-    headers = get_eskiz_headers(token)
+    # Filter out the deleted template (handle both string and int ids)
+    updated_templates = [t for t in local_templates if str(t['id']) != str(template_id)]
     
-    try:
-        response = requests.delete(url, headers=headers)
-        print(f"Eskiz DELETE user/template/{template_id} status code: {response.status_code}")
-        print(f"Eskiz DELETE user/template/{template_id} response: {response.text}")
-        if response.status_code == 401:
-            cache.delete(ESKIZ_TOKEN_CACHE_KEY)
-        if response.status_code in [200, 201]:
-            return {"status": "success", "message": "Template deleted successfully"}
-        else:
-            error_msg = format_eskiz_error(response.status_code, response.text)
-            return {
-                "status": "error",
-                "message": error_msg
-            }
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
+    if len(updated_templates) == len(local_templates):
+        return {"status": "error", "message": "Template not found"}
+        
+    if save_local_templates(updated_templates):
+        return {"status": "success", "message": "Template deleted successfully"}
+    return {"status": "error", "message": "Failed to save template"}
 
 
 def get_balance():
