@@ -10,6 +10,7 @@ env.read_env()
 ESKIZ_EMAIL = env.str("ESKIZ_EMAIL", "")
 ESKIZ_PASSWORD = env.str("ESKIZ_PASSWORD", "")
 ESKIZ_BASE_URL = "https://notify.eskiz.uz/api/"
+ESKIZ_TOKEN_CACHE_KEY = f"eskiz_token_{ESKIZ_EMAIL}"
 
 def format_eskiz_error(status_code, response_text):
     try:
@@ -56,7 +57,7 @@ def format_eskiz_error(status_code, response_text):
     return f"Eskiz API Error: {status_code}"
 
 def get_eskiz_token():
-    token = cache.get("eskiz_token")
+    token = cache.get(ESKIZ_TOKEN_CACHE_KEY)
     if token:
         return token
     
@@ -71,7 +72,7 @@ def get_eskiz_token():
         if response.status_code == 200:
             token = data.get('data', {}).get('token')
             # Token is valid for 30 days, we cache it for 29 days
-            cache.set("eskiz_token", token, 60 * 60 * 24 * 29)
+            cache.set(ESKIZ_TOKEN_CACHE_KEY, token, 60 * 60 * 24 * 29)
             return token
     except Exception as e:
         print(f"Eskiz login error: {e}")
@@ -99,7 +100,7 @@ def send_sms(mobile_phone, message, from_name="4546"):
         response = requests.post(url, data=payload, headers=headers)
         print(f"Eskiz send SMS response to {phone}: {response.text}")
         if response.status_code == 401:
-            cache.delete("eskiz_token")
+            cache.delete(ESKIZ_TOKEN_CACHE_KEY)
         if response.status_code in [200, 201]:
             return response.json()
         else:
@@ -134,7 +135,7 @@ def get_templates():
             response = requests.get(url, headers=headers)
             print(f"Eskiz GET {ep} status code: {response.status_code}")
             if response.status_code == 401:
-                cache.delete("eskiz_token")
+                cache.delete(ESKIZ_TOKEN_CACHE_KEY)
                 break
             if response.status_code == 200:
                 data = response.json()
@@ -254,14 +255,14 @@ def add_template(name, text):
         print(f"Eskiz POST user/template response text: {response.text}")
         
         if response.status_code == 401:
-            cache.delete("eskiz_token")
+            cache.delete(ESKIZ_TOKEN_CACHE_KEY)
         
         # Fallback to other endpoints if the main one fails with 404
         if response.status_code == 404:
             url = f"{ESKIZ_BASE_URL}template"
             response = requests.post(url, data={'name': name, 'text': text}, headers=headers)
             if response.status_code == 401:
-                cache.delete("eskiz_token")
+                cache.delete(ESKIZ_TOKEN_CACHE_KEY)
             
         if response.status_code in [200, 201]:
             try:
@@ -290,7 +291,7 @@ def delete_template(template_id):
         print(f"Eskiz DELETE user/template/{template_id} status code: {response.status_code}")
         print(f"Eskiz DELETE user/template/{template_id} response: {response.text}")
         if response.status_code == 401:
-            cache.delete("eskiz_token")
+            cache.delete(ESKIZ_TOKEN_CACHE_KEY)
         if response.status_code in [200, 201]:
             return {"status": "success", "message": "Template deleted successfully"}
         else:
@@ -331,7 +332,7 @@ def get_balance():
             print(f"Eskiz GET {ep} status: {response.status_code}, body: {response.text[:300]}")
 
             if response.status_code == 401:
-                cache.delete("eskiz_token")
+                cache.delete(ESKIZ_TOKEN_CACHE_KEY)
                 last_error = format_eskiz_error(response.status_code, response.text)
                 break
 
