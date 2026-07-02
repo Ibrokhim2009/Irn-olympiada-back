@@ -1856,12 +1856,14 @@ class TicketReplyViewSet(viewsets.ModelViewSet):
         return super().destroy(request, *args, **kwargs)
 
 
-from .utils_eskiz import get_templates, add_template, send_sms, delete_template, get_balance
+from .utils_eskiz import get_templates, add_template, send_sms, delete_template, get_balance, get_templates_debug
 
 class SMSTemplateView(APIView):
     permission_classes = (permissions.IsAdminUser,)
 
     def get(self, request):
+        if request.query_params.get('debug') == '1':
+            return Response(get_templates_debug())
         templates = get_templates()
         return Response(templates)
 

@@ -213,6 +213,30 @@ def get_templates():
     return all_templates
 
 
+def get_templates_debug():
+    token = get_eskiz_token()
+    if not token:
+        return {"error": "Failed to get Eskiz token"}
+    
+    endpoints = ["user/templates", "user/template", "template", "message/sms/template"]
+    headers = { 'Authorization': f'Bearer {token}' }
+    
+    results = {}
+    for ep in endpoints:
+        url = f"{ESKIZ_BASE_URL}{ep}"
+        try:
+            response = requests.get(url, headers=headers, timeout=10)
+            results[ep] = {
+                "status_code": response.status_code,
+                "body": response.text[:2000]
+            }
+        except Exception as e:
+            results[ep] = {
+                "error": str(e)
+            }
+    return results
+
+
 def add_template(name, text):
     token = get_eskiz_token()
     if not token:
