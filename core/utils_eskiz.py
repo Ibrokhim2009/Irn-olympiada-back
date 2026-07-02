@@ -15,10 +15,15 @@ def format_eskiz_error(status_code, response_text):
     try:
         import json
         data = json.loads(response_text)
+        
+        # Check standard error messages
         msg = data.get('message') or data.get('error') or data.get('error_description')
+        if not msg and isinstance(data.get('data'), dict):
+            inner_data = data.get('data')
+            msg = inner_data.get('message') or inner_data.get('error') or inner_data.get('alert')
+            
         if msg:
             if isinstance(msg, dict):
-                # Format dictionary as "key: error1, error2"
                 parts = []
                 for k, v in msg.items():
                     if isinstance(v, list):
@@ -29,6 +34,20 @@ def format_eskiz_error(status_code, response_text):
             elif isinstance(msg, list):
                 return ", ".join(map(str, msg))
             return str(msg)
+            
+        # Check validation errors (e.g. {"errors": {"template": ["min=10"]}})
+        errors = data.get('errors')
+        if not errors and isinstance(data.get('data'), dict):
+            errors = data.get('data').get('errors')
+            
+        if errors and isinstance(errors, dict):
+            parts = []
+            for k, v in errors.items():
+                if isinstance(v, list):
+                    parts.append(f"{k}: {', '.join(map(str, v))}")
+                else:
+                    parts.append(f"{k}: {v}")
+            return "; ".join(parts)
     except Exception:
         pass
     
