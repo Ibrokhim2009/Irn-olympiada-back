@@ -180,8 +180,38 @@ def get_templates():
         except Exception as e:
             print(f"Error fetching from {ep}: {e}")
             continue
+    
+    # Always include the three standard test templates so that unverified/test accounts
+    # can test SMS sending functionality in development.
+    all_templates.extend([
+        {
+            'id': 'test_uz',
+            'text': 'Bu Eskiz dan test',
+            'status': 'approved',
+            'created_at': now_iso,
+            'note': 'Встроенный тестовый шаблон (для тест-аккаунтов)',
+            'type': 'service'
+        },
+        {
+            'id': 'test_ru',
+            'text': 'Это тест от Eskiz',
+            'status': 'approved',
+            'created_at': now_iso,
+            'note': 'Встроенный тестовый шаблон (для тест-аккаунтов)',
+            'type': 'service'
+        },
+        {
+            'id': 'test_en',
+            'text': 'This is test from Eskiz',
+            'status': 'approved',
+            'created_at': now_iso,
+            'note': 'Встроенный тестовый шаблон (для тест-аккаунтов)',
+            'type': 'service'
+        }
+    ])
             
     return all_templates
+
 
 def add_template(name, text):
     token = get_eskiz_token()
