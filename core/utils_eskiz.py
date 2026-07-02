@@ -223,7 +223,7 @@ def get_templates_debug():
     if not token:
         return {"error": "Failed to get Eskiz token"}
     
-    endpoints = ["user/templates", "user/template", "template", "message/sms/template"]
+    endpoints = ["user/templates", "user/template", "template", "message/sms/template", "nick/me"]
     headers = get_eskiz_headers(token)
     
     results = {}
