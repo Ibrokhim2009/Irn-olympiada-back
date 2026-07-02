@@ -230,7 +230,7 @@ def get_templates_debug():
     for ep in endpoints:
         url = f"{ESKIZ_BASE_URL}{ep}"
         try:
-            response = requests.get(url, headers=headers, timeout=10)
+            response = requests.get(url, headers=headers, timeout=35)
             results[ep] = {
                 "status_code": response.status_code,
                 "body": response.text[:2000]
@@ -250,7 +250,7 @@ def add_template_debug(text):
     payload = { 'template': text }
     headers = get_eskiz_headers(token)
     try:
-        response = requests.post(url, data=payload, headers=headers, timeout=10)
+        response = requests.post(url, data=payload, headers=headers, timeout=35)
         return {
             "status_code": response.status_code,
             "body": response.text[:2000]
