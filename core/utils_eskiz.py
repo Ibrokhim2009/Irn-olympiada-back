@@ -136,6 +136,24 @@ def save_local_templates(templates):
     except Exception:
         return False
 
+def fetch_eskiz_templates():
+    token = get_eskiz_token()
+    if not token:
+        return []
+    url = f"{ESKIZ_BASE_URL}user/templates"
+    headers = get_eskiz_headers(token)
+    try:
+        response = requests.get(url, headers=headers, timeout=15)
+        if response.status_code == 200:
+            data = response.json()
+            if isinstance(data, dict) and data.get('status') == 'success':
+                return data.get('data', [])
+            elif isinstance(data, list):
+                return data
+    except Exception as e:
+        print(f"Error fetching Eskiz templates: {e}")
+    return []
+
 def get_templates():
     local_templates = load_local_templates()
     
@@ -168,7 +186,46 @@ def get_templates():
             'type': 'service'
         }
     ]
-    all_templates.extend(local_templates)
+    
+    seen_texts = {t['text'].strip() for t in all_templates}
+    
+    # Fetch real templates from Eskiz API
+    eskiz_templates = fetch_eskiz_templates()
+    for t in eskiz_templates:
+        text = t.get('template') or t.get('text') or ''
+        clean_text = text.strip()
+        if not clean_text:
+            continue
+            
+        status = t.get('status') or 'approved'
+        status_lower = str(status).lower()
+        if 'approve' in status_lower or 'activ' in status_lower or status_lower == 'одобрено':
+            status_mapped = 'approved'
+        elif 'moder' in status_lower or 'process' in status_lower or status_lower == 'на модерации':
+            status_mapped = 'moderation'
+        elif 'reject' in status_lower or 'cancel' in status_lower or status_lower == 'отклонен':
+            status_mapped = 'rejected'
+        else:
+            status_mapped = status_lower
+            
+        if clean_text not in seen_texts:
+            seen_texts.add(clean_text)
+            all_templates.append({
+                'id': t.get('id'),
+                'text': text,
+                'status': status_mapped,
+                'created_at': t.get('created_at') or t.get('created_date') or now_iso,
+                'note': t.get('note') or t.get('name') or '',
+                'type': 'service'
+            })
+
+    # Add any remaining local templates that are not in Eskiz yet
+    for t in local_templates:
+        clean_text = t['text'].strip()
+        if clean_text not in seen_texts:
+            seen_texts.add(clean_text)
+            all_templates.append(t)
+            
     return all_templates
 
 
@@ -221,12 +278,30 @@ def add_template(name, text):
         if t['text'] == text:
             return {"status": "error", "message": "Template with this text already exists"}
             
+    # Attempt to submit to Eskiz for moderation
+    token = get_eskiz_token()
+    eskiz_id = None
+    if token:
+        url = f"{ESKIZ_BASE_URL}user/template"
+        payload = { 'template': text }
+        headers = get_eskiz_headers(token)
+        try:
+            response = requests.post(url, data=payload, headers=headers, timeout=15)
+            print(f"Eskiz submit template response: {response.status_code} - {response.text}")
+            if response.status_code in [200, 201]:
+                res_data = response.json()
+                inner = res_data.get('data') or res_data
+                if isinstance(inner, dict):
+                    eskiz_id = inner.get('id')
+        except Exception as e:
+            print(f"Eskiz submit template error: {e}")
+            
     now_iso = datetime.datetime.utcnow().isoformat() + 'Z'
-    new_id = int(time.time() * 1000) # Unique numeric ID
+    new_id = eskiz_id or int(time.time() * 1000)
     new_template = {
         'id': new_id,
         'text': text,
-        'status': 'approved', # Locally stored templates are always approved
+        'status': 'moderation' if eskiz_id else 'approved',
         'created_at': now_iso,
         'note': name,
         'type': 'service'
