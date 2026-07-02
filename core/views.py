@@ -1899,6 +1899,7 @@ class SMSSendView(APIView):
         user_ids = request.data.get('user_ids', [])
         message = request.data.get('message')
         template_id = request.data.get('template_id')
+        allow_resend = request.data.get('allow_resend', False)
         
         if not user_ids or not message:
             return Response({'error': 'Users and message are required'}, status=400)
@@ -1909,7 +1910,7 @@ class SMSSendView(APIView):
         # 1. Fetch already sent users and phones for this template (if template_id is provided)
         already_sent_user_ids = set()
         already_sent_phones = set()
-        if template_id:
+        if template_id and not allow_resend:
             try:
                 already_sent_user_ids = set(
                     SMSSentHistory.objects.filter(template_id=template_id).values_list('user_id', flat=True)
@@ -1931,7 +1932,7 @@ class SMSSendView(APIView):
                 continue
 
             # Skip if user has already received this template in the past
-            if template_id and (user.id in already_sent_user_ids or clean_phone in already_sent_phones):
+            if not allow_resend and template_id and (user.id in already_sent_user_ids or clean_phone in already_sent_phones):
                 results.append({
                     'user_id': user.id,
                     'phone': user.phone,
