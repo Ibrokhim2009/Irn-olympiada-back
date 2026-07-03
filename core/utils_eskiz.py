@@ -168,7 +168,8 @@ def fetch_eskiz_templates():
             if isinstance(data, list):
                 page_templates = data
             elif isinstance(data, dict):
-                inner_data = data.get('data')
+                # Eskiz API can return list under 'result' or 'data'
+                inner_data = data.get('result') or data.get('data')
                 if isinstance(inner_data, list):
                     page_templates = inner_data
                     # Check for pagination at the root level
@@ -183,9 +184,12 @@ def fetch_eskiz_templates():
                         last_page = data['pagination'].get('last_page')
                         current_page = data['pagination'].get('current_page')
                 elif isinstance(inner_data, dict):
-                    page_templates = inner_data.get('data', [])
+                    page_templates = inner_data.get('data') or inner_data.get('result') or []
                     last_page = inner_data.get('last_page') or inner_data.get('last')
                     current_page = inner_data.get('current_page') or inner_data.get('current')
+                else:
+                    # Fallback check if list is directly inside root keys
+                    page_templates = data.get('result') or data.get('data') or []
             
             if isinstance(page_templates, list) and page_templates:
                 all_templates.extend(page_templates)
@@ -246,9 +250,9 @@ def get_templates():
             
         status = t.get('status') or 'approved'
         status_lower = str(status).lower()
-        if 'approve' in status_lower or 'activ' in status_lower or 'одобрен' in status_lower:
+        if 'approve' in status_lower or 'activ' in status_lower or 'одобрен' in status_lower or 'service' in status_lower:
             status_mapped = 'approved'
-        elif 'moder' in status_lower or 'process' in status_lower or 'модераци' in status_lower or 'процесс' in status_lower:
+        elif 'moder' in status_lower or 'process' in status_lower or 'proccess' in status_lower or 'модераци' in status_lower or 'процесс' in status_lower or status_lower == 'inproccess':
             status_mapped = 'moderation'
         elif 'reject' in status_lower or 'cancel' in status_lower or 'отклон' in status_lower or 'отказ' in status_lower:
             status_mapped = 'rejected'
