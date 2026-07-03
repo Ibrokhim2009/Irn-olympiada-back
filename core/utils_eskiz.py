@@ -161,27 +161,36 @@ def fetch_eskiz_templates():
                 break
                 
             data = response.json()
+            page_templates = []
+            last_page = None
+            current_page = None
+            
             if isinstance(data, list):
-                all_templates.extend(data)
-                break
-                
-            if isinstance(data, dict):
+                page_templates = data
+            elif isinstance(data, dict):
                 inner_data = data.get('data')
                 if isinstance(inner_data, list):
-                    all_templates.extend(inner_data)
-                    break
+                    page_templates = inner_data
+                    # Check for pagination at the root level
+                    last_page = data.get('last_page') or data.get('last')
+                    current_page = data.get('current_page') or data.get('current')
+                    # Or inside a 'meta' key
+                    if not last_page and isinstance(data.get('meta'), dict):
+                        last_page = data['meta'].get('last_page')
+                        current_page = data['meta'].get('current_page')
+                    # Or inside a 'pagination' key
+                    if not last_page and isinstance(data.get('pagination'), dict):
+                        last_page = data['pagination'].get('last_page')
+                        current_page = data['pagination'].get('current_page')
                 elif isinstance(inner_data, dict):
                     page_templates = inner_data.get('data', [])
-                    if isinstance(page_templates, list):
-                        all_templates.extend(page_templates)
-                    
-                    last_page = inner_data.get('last_page')
-                    current_page = inner_data.get('current_page')
-                    
-                    if last_page and current_page and current_page < last_page:
-                        page += 1
-                    else:
-                        break
+                    last_page = inner_data.get('last_page') or inner_data.get('last')
+                    current_page = inner_data.get('current_page') or inner_data.get('current')
+            
+            if isinstance(page_templates, list) and page_templates:
+                all_templates.extend(page_templates)
+                if last_page and current_page and current_page < last_page:
+                    page += 1
                 else:
                     break
             else:
