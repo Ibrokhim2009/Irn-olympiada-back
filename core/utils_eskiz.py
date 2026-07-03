@@ -140,21 +140,57 @@ def fetch_eskiz_templates():
     token = get_eskiz_token()
     if not token:
         return []
-    url = f"{ESKIZ_BASE_URL}user/templates"
+    
     headers = get_eskiz_headers(token)
-    try:
-        response = requests.get(url, headers=headers, timeout=15)
-        if response.status_code == 200:
+    all_templates = []
+    page = 1
+    
+    while True:
+        url = f"{ESKIZ_BASE_URL}user/templates?page={page}"
+        try:
+            response = requests.get(url, headers=headers, timeout=15)
+            if response.status_code == 401:
+                cache.delete(ESKIZ_TOKEN_CACHE_KEY)
+                token = get_eskiz_token()
+                if not token:
+                    break
+                headers = get_eskiz_headers(token)
+                continue
+                
+            if response.status_code != 200:
+                break
+                
             data = response.json()
+            if isinstance(data, list):
+                all_templates.extend(data)
+                break
+                
             if isinstance(data, dict):
-                # Eskiz API may return status or message as 'success' or just return data directly
-                if data.get('status') == 'success' or data.get('message') == 'success' or 'data' in data:
-                    return data.get('data', [])
-            elif isinstance(data, list):
-                return data
-    except Exception as e:
-        print(f"Error fetching Eskiz templates: {e}")
-    return []
+                inner_data = data.get('data')
+                if isinstance(inner_data, list):
+                    all_templates.extend(inner_data)
+                    break
+                elif isinstance(inner_data, dict):
+                    page_templates = inner_data.get('data', [])
+                    if isinstance(page_templates, list):
+                        all_templates.extend(page_templates)
+                    
+                    last_page = inner_data.get('last_page')
+                    current_page = inner_data.get('current_page')
+                    
+                    if last_page and current_page and current_page < last_page:
+                        page += 1
+                    else:
+                        break
+                else:
+                    break
+            else:
+                break
+        except Exception as e:
+            print(f"Error fetching Eskiz templates on page {page}: {e}")
+            break
+            
+    return all_templates
 
 def get_templates():
     local_templates = load_local_templates()
@@ -189,9 +225,9 @@ def get_templates():
         }
     ]
     
-    seen_texts = {t['text'].strip() for t in all_templates}
+    templates_dict = {}
     
-    # Fetch real templates from Eskiz API
+    # Process Eskiz templates
     eskiz_templates = fetch_eskiz_templates()
     for t in eskiz_templates:
         text = t.get('template') or t.get('text') or ''
@@ -210,24 +246,59 @@ def get_templates():
         else:
             status_mapped = status_lower
             
-        if clean_text not in seen_texts:
-            seen_texts.add(clean_text)
-            all_templates.append({
-                'id': t.get('id'),
-                'text': text,
-                'status': status_mapped,
-                'created_at': t.get('created_at') or t.get('created_date') or now_iso,
-                'note': t.get('note') or t.get('name') or '',
-                'type': 'service'
-            })
-
-    # Add any remaining local templates that are not in Eskiz yet
+        template_obj = {
+            'id': t.get('id'),
+            'text': text,
+            'status': status_mapped,
+            'created_at': t.get('created_at') or t.get('created_date') or now_iso,
+            'note': t.get('note') or t.get('name') or '',
+            'type': 'service'
+        }
+        
+        existing = templates_dict.get(clean_text)
+        if not existing:
+            templates_dict[clean_text] = template_obj
+        else:
+            # Prioritize 'approved' status over others
+            if template_obj['status'] == 'approved' and existing['status'] != 'approved':
+                templates_dict[clean_text] = template_obj
+            elif template_obj['status'] == 'moderation' and existing['status'] == 'rejected':
+                templates_dict[clean_text] = template_obj
+                
+    # Process local templates
     for t in local_templates:
         clean_text = t['text'].strip()
+        template_obj = t
+        
+        existing = templates_dict.get(clean_text)
+        if not existing:
+            templates_dict[clean_text] = template_obj
+        else:
+            # Prioritize 'approved' status over others
+            if template_obj.get('status') == 'approved' and existing['status'] != 'approved':
+                templates_dict[clean_text] = template_obj
+            elif template_obj.get('status') == 'moderation' and existing['status'] == 'rejected':
+                templates_dict[clean_text] = template_obj
+
+    # Add the test templates first
+    seen_texts = {t['text'].strip() for t in all_templates}
+    
+    # Add mapped/deduplicated templates from Eskiz and local storage
+    for clean_text, tpl in templates_dict.items():
         if clean_text not in seen_texts:
             seen_texts.add(clean_text)
-            all_templates.append(t)
+            all_templates.append(tpl)
             
+    # Sort templates by created_at descending (newest first)
+    def get_sort_key(tpl):
+        dt_str = tpl.get('created_at') or ''
+        return dt_str.replace('T', ' ').replace('Z', '')
+        
+    try:
+        all_templates.sort(key=get_sort_key, reverse=True)
+    except Exception:
+        pass
+        
     return all_templates
 
 
