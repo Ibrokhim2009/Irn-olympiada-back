@@ -146,8 +146,10 @@ def fetch_eskiz_templates():
         response = requests.get(url, headers=headers, timeout=15)
         if response.status_code == 200:
             data = response.json()
-            if isinstance(data, dict) and data.get('status') == 'success':
-                return data.get('data', [])
+            if isinstance(data, dict):
+                # Eskiz API may return status or message as 'success' or just return data directly
+                if data.get('status') == 'success' or data.get('message') == 'success' or 'data' in data:
+                    return data.get('data', [])
             elif isinstance(data, list):
                 return data
     except Exception as e:
@@ -199,11 +201,11 @@ def get_templates():
             
         status = t.get('status') or 'approved'
         status_lower = str(status).lower()
-        if 'approve' in status_lower or 'activ' in status_lower or status_lower == 'одобрено':
+        if 'approve' in status_lower or 'activ' in status_lower or 'одобрен' in status_lower:
             status_mapped = 'approved'
-        elif 'moder' in status_lower or 'process' in status_lower or status_lower == 'на модерации':
+        elif 'moder' in status_lower or 'process' in status_lower or 'модераци' in status_lower or 'процесс' in status_lower:
             status_mapped = 'moderation'
-        elif 'reject' in status_lower or 'cancel' in status_lower or status_lower == 'отклонен':
+        elif 'reject' in status_lower or 'cancel' in status_lower or 'отклон' in status_lower or 'отказ' in status_lower:
             status_mapped = 'rejected'
         else:
             status_mapped = status_lower
