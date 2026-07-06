@@ -207,37 +207,10 @@ def fetch_eskiz_templates():
 
 def get_templates():
     local_templates = load_local_templates()
-    
-    # Always include the three standard test templates so that developers using test accounts
-    # can test SMS sending functionality in development.
+
     now_iso = datetime.datetime.utcnow().isoformat() + 'Z'
-    all_templates = [
-        {
-            'id': 'test_uz',
-            'text': 'Bu Eskiz dan test',
-            'status': 'approved',
-            'created_at': now_iso,
-            'note': 'Tizim shabloni (uz)',
-            'type': 'service'
-        },
-        {
-            'id': 'test_ru',
-            'text': 'Test ot Eskiz',
-            'status': 'approved',
-            'created_at': now_iso,
-            'note': 'Sistemnyj shablon (ru)',
-            'type': 'service'
-        },
-        {
-            'id': 'test_en',
-            'text': 'This is test from Eskiz',
-            'status': 'approved',
-            'created_at': now_iso,
-            'note': 'System template (en)',
-            'type': 'service'
-        }
-    ]
-    
+    all_templates = []
+
     templates_dict = {}
     
     # Process Eskiz templates
@@ -293,8 +266,7 @@ def get_templates():
             elif template_obj.get('status') == 'moderation' and existing['status'] == 'rejected':
                 templates_dict[clean_text] = template_obj
 
-    # Add the test templates first
-    seen_texts = {t['text'].strip() for t in all_templates}
+    seen_texts = set()
     
     # Add mapped/deduplicated templates from Eskiz and local storage
     for clean_text, tpl in templates_dict.items():
@@ -398,9 +370,6 @@ def add_template(name, text):
     return {"status": "error", "message": "Failed to save template"}
 
 def delete_template(template_id):
-    if template_id in ['test_uz', 'test_ru', 'test_en']:
-        return {"status": "error", "message": "Cannot delete system test templates"}
-        
     local_templates = load_local_templates()
     
     # Filter out the deleted template (handle both string and int ids)
