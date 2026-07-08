@@ -531,13 +531,22 @@ class BookSerializer(serializers.ModelSerializer):
     cover_image = Base64ImageField(required=False, allow_null=True)
     pdf_file = serializers.FileField(required=False, allow_null=True)
     telegram_link = serializers.URLField(required=False, allow_null=True, allow_blank=True)
+    ordered_count = serializers.SerializerMethodField()
+    remaining_stock = serializers.SerializerMethodField()
 
     class Meta:
         model = Book
         fields = ('id', 'title', 'description', 'title_uz', 'title_ru', 'title_en',
                   'description_uz', 'description_ru', 'description_en',
-                  'book_type', 'price', 'cover_image', 'pdf_file', 'telegram_link',
+                  'book_type', 'price', 'stock', 'ordered_count', 'remaining_stock',
+                  'cover_image', 'pdf_file', 'telegram_link',
                   'is_active', 'created_at')
+
+    def get_ordered_count(self, obj):
+        return obj.ordered_count()
+
+    def get_remaining_stock(self, obj):
+        return obj.remaining_stock()
 
     def to_representation(self, instance):
         request = self.context.get('request')

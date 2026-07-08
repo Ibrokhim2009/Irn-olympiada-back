@@ -560,6 +560,7 @@ class Book(models.Model):
 
     book_type = models.CharField(max_length=10, choices=BookType.choices, default=BookType.FREE, db_index=True)
     price = models.BigIntegerField(default=0, help_text="Цена в UZS (целое число)")
+    stock = models.PositiveIntegerField(default=0, help_text="Общее количество книг на складе (максимум для заказов)")
     cover_image = models.ImageField(upload_to='books/covers/', null=True, blank=True)
     pdf_file = models.FileField(upload_to='books/pdfs/', null=True, blank=True, help_text="Только для бесплатных книг")
     telegram_link = models.URLField(max_length=500, null=True, blank=True, help_text="Ссылка на Telegram для покупки платных книг")
@@ -581,6 +582,14 @@ class Book(models.Model):
             val = getattr(self, f"{field}_{l}", None)
             if val: return val
         return ""
+
+    def ordered_count(self):
+        return self.orders.exclude(status='rejected').aggregate(
+            total=models.Sum('amount')
+        )['total'] or 0
+
+    def remaining_stock(self):
+        return max(0, self.stock - self.ordered_count())
 
 
 class BookOrder(models.Model):

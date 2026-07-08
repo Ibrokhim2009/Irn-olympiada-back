@@ -217,17 +217,23 @@ def process_books(chat_id):
             title = book.title_uz or book.title_ru or book.title_en or 'Book'
             desc = book.description_uz or book.description_ru or book.description_en or ""
             price_val = book.price or 0
+            remaining = book.remaining_stock()
             text = (
                 f"📖 <b>{title}</b>\n\n"
                 f"📝 {desc}\n\n"
-                f"💰 <b>Narxi / Цена:</b> {price_val:,} UZS"
+                f"💰 <b>Narxi / Цена:</b> {price_val:,} UZS\n"
+                f"📦 <b>Omborda / В наличии:</b> {remaining} ta / шт."
             )
-            
-            reply_markup = {
-                "inline_keyboard": [
-                    [{"text": "Sotib olish / Купить", "callback_data": f"buy_book:{book.id}"}]
-                ]
-            }
+
+            if remaining > 0:
+                reply_markup = {
+                    "inline_keyboard": [
+                        [{"text": "Sotib olish / Купить", "callback_data": f"buy_book:{book.id}"}]
+                    ]
+                }
+            else:
+                text += "\n\n❌ <b>Sotuvda yo'q / Нет в наличии</b>"
+                reply_markup = None
             
             sent_photo = False
             if book.cover_image:
@@ -240,8 +246,9 @@ def process_books(chat_id):
                                 "chat_id": chat_id,
                                 "caption": text,
                                 "parse_mode": "HTML",
-                                "reply_markup": reply_markup
                             }
+                            if reply_markup:
+                                payload["reply_markup"] = reply_markup
                             files = {"photo": f}
                             res = requests.post(API_URL + "sendPhoto", data=payload, files=files)
                             if res.status_code == 200:
@@ -258,8 +265,9 @@ def process_books(chat_id):
                             "photo": public_url,
                             "caption": text,
                             "parse_mode": "HTML",
-                            "reply_markup": reply_markup
                         }
+                        if reply_markup:
+                            payload["reply_markup"] = reply_markup
                         res = requests.post(API_URL + "sendPhoto", json=payload)
                         if res.status_code == 200:
                             sent_photo = True
@@ -346,7 +354,22 @@ def process_state_message(chat_id, message, state):
         except ValueError:
             send_message(chat_id, "Iltimos, to'g'ri son kiriting (masalan: 1, 2, 5). / Пожалуйста, введите целое положительное число.")
             return
-            
+
+        book = Book.objects.filter(id=state["book_id"]).first()
+        if not book:
+            send_message(chat_id, "Kechirasiz, kitob topilmadi. / Извините, книга не найдена.", reply_markup=get_keyboard())
+            USER_STATES.pop(chat_id, None)
+            return
+
+        remaining = book.remaining_stock()
+        if amount > remaining:
+            send_message(
+                chat_id,
+                f"Kechirasiz, omborda faqat {remaining} ta kitob qoldi. Iltimos, kamroq son kiriting.\n"
+                f"Извините, на складе осталось только {remaining} шт. Пожалуйста, введите меньшее количество."
+            )
+            return
+
         state["amount"] = amount
         state["state"] = "ENTER_ADDRESS"
         
@@ -439,7 +462,17 @@ def process_state_message(chat_id, message, state):
         try:
             user = User.objects.filter(telegram_chat_id=str(chat_id)).first()
             book = Book.objects.get(id=state["book_id"])
-            
+
+            if state["amount"] > book.remaining_stock():
+                send_message(
+                    chat_id,
+                    "Kechirasiz, siz kutayotgan vaqtda bu kitob sotilib bo'ldi yoki qoldiq yetarli emas. Buyurtma bekor qilindi.\n"
+                    "Извините, пока вы ждали, книга закончилась или остатка недостаточно. Заказ отменен.",
+                    reply_markup=get_keyboard()
+                )
+                USER_STATES.pop(chat_id, None)
+                return
+
             order = BookOrder(
                 user=user,
                 book=book,
