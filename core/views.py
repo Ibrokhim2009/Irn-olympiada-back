@@ -1,6 +1,7 @@
 import hashlib
 import logging
 import requests
+import threading
 from django.conf import settings
 from django.db import models, transaction
 from django.shortcuts import get_object_or_404
@@ -2246,33 +2247,39 @@ class TelegramUsersListView(APIView):
 class TelegramBroadcastView(APIView):
     permission_classes = (permissions.IsAdminUser,)
 
+    @staticmethod
+    def _send_broadcast(chat_ids, message):
+        BOT_TOKEN = "7361972097:AAFOiy-yKvejKL_nG4r9b7ecmj6TzJC655A"
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+        for chat_id in chat_ids:
+            try:
+                requests.post(url, json={
+                    "chat_id": chat_id,
+                    "text": message,
+                    "parse_mode": "HTML"
+                }, timeout=5)
+            except Exception:
+                pass
+
     def post(self, request):
         message = request.data.get('message', '').strip()
         if not message:
             return Response({'error': 'Message is required'}, status=400)
 
-        users = User.objects.filter(telegram_chat_id__isnull=False).exclude(telegram_chat_id='')
-        success_count = 0
-        total = users.count()
+        chat_ids = list(
+            User.objects.filter(telegram_chat_id__isnull=False)
+            .exclude(telegram_chat_id='')
+            .values_list('telegram_chat_id', flat=True)
+        )
 
-        for u in users:
-            BOT_TOKEN = "7361972097:AAFOiy-yKvejKL_nG4r9b7ecmj6TzJC655A"
-            url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-            payload = {
-                "chat_id": u.telegram_chat_id,
-                "text": message,
-                "parse_mode": "HTML"
-            }
-            try:
-                res = requests.post(url, json=payload, timeout=5)
-                if res.status_code == 200:
-                    success_count += 1
-            except Exception:
-                pass
+        # Sending one-by-one to hundreds of users inside the request/response cycle
+        # was blowing past the gateway timeout (504). Run it in the background instead
+        # and return immediately.
+        threading.Thread(target=self._send_broadcast, args=(chat_ids, message), daemon=True).start()
 
         return Response({
             'success': True,
-            'message': f'Broadcast complete. Sent to {success_count} of {total} users.'
+            'message': f'Broadcast started for {len(chat_ids)} users. Sending in background.'
         })
 
 

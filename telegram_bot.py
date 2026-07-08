@@ -544,51 +544,68 @@ def main():
             updates = res.json().get("result", [])
             for update in updates:
                 offset = update["update_id"] + 1
-                
-                # Check for callback query
-                callback_query = update.get("callback_query")
-                if callback_query:
-                    process_callback_query(callback_query)
-                    continue
-                
-                message = update.get("message")
-                if not message:
-                    continue
- 
-                chat_id = message["chat"]["id"]
-                text = message.get("text", "")
-                contact = message.get("contact")
-                
-                # If user is in middle of a multi-step order flow
-                if chat_id in USER_STATES:
-                    process_state_message(chat_id, message, USER_STATES[chat_id])
+
+                # A bug in handling one update should never stop the rest of the
+                # batch from being processed (or take down the whole bot).
+                try:
+                    # Check for callback query
+                    callback_query = update.get("callback_query")
+                    if callback_query:
+                        process_callback_query(callback_query)
+                        continue
+
+                    message = update.get("message")
+                    if not message:
+                        continue
+
+                    chat_id = message["chat"]["id"]
+                    text = message.get("text", "")
+                    contact = message.get("contact")
+
+                    # If user is in middle of a multi-step order flow
+                    if chat_id in USER_STATES:
+                        process_state_message(chat_id, message, USER_STATES[chat_id])
+                        continue
+
+                    if text.startswith("/start"):
+                        parts = text.split(maxsplit=1)
+                        payload = parts[1] if len(parts) > 1 else None
+                        process_start(chat_id, payload)
+
+                    elif text.startswith("/broadcast"):
+                        process_broadcast(chat_id, text)
+
+                    elif text.startswith("/books") or text == "📚 Kitob do'koni / Магазин книг":
+                        process_books(chat_id)
+
+                    elif contact:
+                        process_contact(chat_id, contact)
+
+                    elif text:
+                        help_text = (
+                            "Profilingizni bog'lash uchun shaxsiy kabinetdagi havoladan o'ting. "
+                            "Parolni tiklash va profilingizni ulash uchun quyidagi 'Telefon raqamni yuborish' tugmasini bosing.\n\n"
+                            "Kitoblar xarid qilish uchun <b>📚 Kitob do'koni / Магазин книг</b> tugmasini bosing."
+                        )
+                        send_message(chat_id, help_text, reply_markup=get_keyboard())
+                except Exception as e:
+                    print(f"Error processing update {update.get('update_id')}:", e)
                     continue
 
-                if text.startswith("/start"):
-                    parts = text.split(maxsplit=1)
-                    payload = parts[1] if len(parts) > 1 else None
-                    process_start(chat_id, payload)
- 
-                elif text.startswith("/broadcast"):
-                    process_broadcast(chat_id, text)
-                    
-                elif text.startswith("/books") or text == "📚 Kitob do'koni / Магазин книг":
-                    process_books(chat_id)
- 
-                elif contact:
-                    process_contact(chat_id, contact)
- 
-                elif text:
-                    help_text = (
-                        "Profilingizni bog'lash uchun shaxsiy kabinetdagi havoladan o'ting. "
-                        "Parolni tiklash va profilingizni ulash uchun quyidagi 'Telefon raqamni yuborish' tugmasini bosing.\n\n"
-                        "Kitoblar xarid qilish uchun <b>📚 Kitob do'koni / Магазин книг</b> tugmasini bosing."
-                    )
-                    send_message(chat_id, help_text, reply_markup=get_keyboard())
- 
         except Exception as e:
             print("Bot polling encountered error:", e)
             time.sleep(5)
  
 if __name__ == "__main__":
-    main()
+    # main() already never intentionally exits, but this is a last line of
+    # defense: if it ever does raise or return, restart it instead of letting
+    # the process die (systemd's Restart= is the other layer of this).
+    while True:
+        try:
+            main()
+            print("main() returned unexpectedly, restarting in 5s...")
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as e:
+            print("Fatal error in main(), restarting in 5s:", e)
+        time.sleep(5)
