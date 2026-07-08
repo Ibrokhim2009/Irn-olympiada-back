@@ -584,12 +584,15 @@ class Book(models.Model):
         return ""
 
     def ordered_count(self):
+        """Informational: total units ever ordered (excluding rejected orders)."""
         return self.orders.exclude(status='rejected').aggregate(
             total=models.Sum('amount')
         )['total'] or 0
 
     def remaining_stock(self):
-        return max(0, self.stock - self.ordered_count())
+        """`stock` is live inventory: decremented when an order is placed,
+        restored when an order is rejected. This is simply the current count."""
+        return self.stock
 
 
 class BookOrder(models.Model):

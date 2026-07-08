@@ -2,7 +2,7 @@ import hashlib
 import logging
 import requests
 from django.conf import settings
-from django.db import models
+from django.db import models, transaction
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, status, permissions, viewsets
 from rest_framework.decorators import action
@@ -2300,10 +2300,25 @@ class BookOrderViewSet(viewsets.ModelViewSet):
         if not new_status or new_status not in BookOrder.Status.values:
             return Response({'error': 'Invalid status'}, status=400)
 
-        order.status = new_status
-        if new_status == 'rejected' and rejection_reason:
-            order.rejection_reason = rejection_reason
-        order.save()
+        old_status = order.status
+
+        with transaction.atomic():
+            # Stock was reserved (decremented) when the order was placed.
+            # Releasing it back to stock only when the order newly becomes rejected,
+            # and re-reserving it if a rejected order is reverted to another status.
+            if new_status == 'rejected' and old_status != 'rejected':
+                book = Book.objects.select_for_update().get(id=order.book_id)
+                book.stock += order.amount
+                book.save(update_fields=['stock'])
+            elif old_status == 'rejected' and new_status != 'rejected':
+                book = Book.objects.select_for_update().get(id=order.book_id)
+                book.stock = max(0, book.stock - order.amount)
+                book.save(update_fields=['stock'])
+
+            order.status = new_status
+            if new_status == 'rejected' and rejection_reason:
+                order.rejection_reason = rejection_reason
+            order.save()
 
         # Send telegram notification
         chat_id = order.user.telegram_chat_id

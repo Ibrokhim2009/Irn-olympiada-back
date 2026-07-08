@@ -16,6 +16,7 @@ except Exception as e:
     sys.exit(1)
 
 from django.core.files.base import ContentFile
+from django.db import transaction
 from core.models import User, Book, BookOrder
 
 BOT_TOKEN = "7361972097:AAFOiy-yKvejKL_nG4r9b7ecmj6TzJC655A"
@@ -461,28 +462,35 @@ def process_state_message(chat_id, message, state):
             
         try:
             user = User.objects.filter(telegram_chat_id=str(chat_id)).first()
-            book = Book.objects.get(id=state["book_id"])
 
-            if state["amount"] > book.remaining_stock():
-                send_message(
-                    chat_id,
-                    "Kechirasiz, siz kutayotgan vaqtda bu kitob sotilib bo'ldi yoki qoldiq yetarli emas. Buyurtma bekor qilindi.\n"
-                    "Извините, пока вы ждали, книга закончилась или остатка недостаточно. Заказ отменен.",
-                    reply_markup=get_keyboard()
+            with transaction.atomic():
+                # Lock the book row so concurrent orders can't oversell the same stock
+                book = Book.objects.select_for_update().get(id=state["book_id"])
+
+                if state["amount"] > book.stock:
+                    send_message(
+                        chat_id,
+                        "Kechirasiz, siz kutayotgan vaqtda bu kitob sotilib bo'ldi yoki qoldiq yetarli emas. Buyurtma bekor qilindi.\n"
+                        "Извините, пока вы ждали, книга закончилась или остатка недостаточно. Заказ отменен.",
+                        reply_markup=get_keyboard()
+                    )
+                    USER_STATES.pop(chat_id, None)
+                    return
+
+                book.stock -= state["amount"]
+                book.save(update_fields=["stock"])
+
+                order = BookOrder(
+                    user=user,
+                    book=book,
+                    amount=state["amount"],
+                    total_price=state["total_price"],
+                    delivery_address=state["address"],
+                    status=BookOrder.Status.PENDING
                 )
-                USER_STATES.pop(chat_id, None)
-                return
+                order.save()
 
-            order = BookOrder(
-                user=user,
-                book=book,
-                amount=state["amount"],
-                total_price=state["total_price"],
-                delivery_address=state["address"],
-                status=BookOrder.Status.PENDING
-            )
-            
-            # Save receipt image
+            # Save receipt image (outside the stock-locking transaction — this does network I/O)
             filename = f"receipt_{uuid.uuid4().hex[:10]}.jpg"
             order.receipt_image.save(filename, ContentFile(img_res.content), save=True)
             
