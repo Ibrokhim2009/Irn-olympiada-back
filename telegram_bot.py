@@ -413,8 +413,8 @@ def process_state_message(chat_id, message, state):
             f"💰 Narxi / Общая сумма: <b>{total_price:,} UZS</b>\n"
             f"📍 Manzil / Адрес доставки: <b>{state['address']}</b>\n\n"
             f"💳 <b>To'lov ma'lumotlari / Реквизиты для оплаты:</b>\n"
-            f"Karta raqami / Номер карты: <code>8600 1402 1234 5678</code> (Uzcard / Humo)\n"
-            f"Karta egasi / Получатель: <b>IRN OLYMPIADS</b>\n\n"
+            f"Karta raqami / Номер карты: <code>5614 6821 1094 2531</code> (Uzcard / Humo)\n"
+            f"Karta egasi / Получатель: <b>Botirova Mohinur</b>\n\n"
             f"To'lovni amalga oshirgach, iltimos to'lov cheki (kvitansiya, skrinshot) rasmini yoki faylini shu yerga yuboring.\n\n"
             f"После оплаты, пожалуйста, отправьте сюда фото или файл чека."
         )
