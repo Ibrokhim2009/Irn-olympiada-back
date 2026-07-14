@@ -3,7 +3,8 @@ from .models import (
     User, Olympiad, SubOlympiad, SubOlympiadGrade,
     Question, Test, Registration, ExamResult,
     Notification, Region, UserAchievement,
-    SupportTicket, TicketReply, EditRequest, Book, BookOrder
+    SupportTicket, TicketReply, EditRequest, Book, BookOrder,
+    VisaApplicant, VisaDocument, VisaNote
 )
 import base64
 import uuid
@@ -574,3 +575,86 @@ class BookOrderSerializer(serializers.ModelSerializer):
             return f"{obj.user.last_name} {obj.user.first_name}".strip() or obj.user.username
         except:
             return obj.user.username
+
+
+class VisaDocumentSerializer(serializers.ModelSerializer):
+    category_display = serializers.CharField(source='get_category_display', read_only=True)
+    uploaded_by_name = serializers.SerializerMethodField()
+    is_expired = serializers.BooleanField(read_only=True)
+
+    class Meta:
+        model = VisaDocument
+        fields = (
+            'id', 'applicant', 'category', 'category_display', 'file',
+            'expiry_date', 'is_expired', 'needs_replacement', 'notes',
+            'previous_version', 'uploaded_by', 'uploaded_by_name', 'uploaded_at'
+        )
+        read_only_fields = ('uploaded_by', 'uploaded_at')
+
+    def get_uploaded_by_name(self, obj):
+        if not obj.uploaded_by:
+            return None
+        return f"{obj.uploaded_by.last_name} {obj.uploaded_by.first_name}".strip() or obj.uploaded_by.username
+
+
+class VisaNoteSerializer(serializers.ModelSerializer):
+    author_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = VisaNote
+        fields = ('id', 'applicant', 'author', 'author_name', 'text', 'created_at')
+        read_only_fields = ('author', 'created_at')
+
+    def get_author_name(self, obj):
+        if not obj.author:
+            return None
+        return f"{obj.author.last_name} {obj.author.first_name}".strip() or obj.author.username
+
+
+class VisaApplicantListSerializer(serializers.ModelSerializer):
+    full_name = serializers.ReadOnlyField()
+    debt = serializers.ReadOnlyField()
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    assigned_to_name = serializers.SerializerMethodField()
+    olympiad_title = serializers.SerializerMethodField()
+    has_expired_documents = serializers.ReadOnlyField()
+    has_documents_needing_replacement = serializers.ReadOnlyField()
+
+    class Meta:
+        model = VisaApplicant
+        fields = (
+            'id', 'full_name', 'first_name', 'last_name', 'middle_name',
+            'phone', 'email', 'country', 'program_name', 'olympiad', 'olympiad_title',
+            'status', 'status_display', 'assigned_to', 'assigned_to_name',
+            'payment_required', 'payment_paid', 'debt',
+            'embassy_appointment_date', 'has_expired_documents', 'has_documents_needing_replacement',
+            'created_at', 'updated_at'
+        )
+
+    def get_assigned_to_name(self, obj):
+        if not obj.assigned_to:
+            return None
+        return f"{obj.assigned_to.last_name} {obj.assigned_to.first_name}".strip() or obj.assigned_to.username
+
+    def get_olympiad_title(self, obj):
+        if not obj.olympiad:
+            return None
+        return obj.olympiad.title_ru or obj.olympiad.title_uz or obj.olympiad.title_en
+
+
+class VisaApplicantDetailSerializer(VisaApplicantListSerializer):
+    documents = VisaDocumentSerializer(many=True, read_only=True)
+    notes = VisaNoteSerializer(many=True, read_only=True)
+    created_by_name = serializers.SerializerMethodField()
+
+    class Meta(VisaApplicantListSerializer.Meta):
+        fields = VisaApplicantListSerializer.Meta.fields + (
+            'birth_date', 'address',
+            'passport_number', 'passport_issue_date', 'passport_expiry_date', 'passport_issuing_authority',
+            'created_by', 'created_by_name', 'documents', 'notes'
+        )
+
+    def get_created_by_name(self, obj):
+        if not obj.created_by:
+            return None
+        return f"{obj.created_by.last_name} {obj.created_by.first_name}".strip() or obj.created_by.username

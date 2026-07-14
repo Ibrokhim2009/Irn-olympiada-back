@@ -625,3 +625,141 @@ class BookOrder(models.Model):
         return f"Order #{self.id} - {self.user.username} - {book_title} ({self.amount} шт.)"
 
 
+class VisaApplicant(models.Model):
+    class Status(models.TextChoices):
+        NEW = 'new', 'Новый участник'
+        AWAITING_PAYMENT = 'awaiting_payment', 'Ожидается оплата'
+        AWAITING_DOCUMENTS = 'awaiting_documents', 'Ожидаются документы'
+        DOCUMENTS_RECEIVED = 'documents_received', 'Документы получены'
+        DOCUMENTS_REVIEWING = 'documents_reviewing', 'Документы проверяются'
+        NEEDS_CORRECTION = 'needs_correction', 'Требуется исправление'
+        NEEDS_REPLACEMENT = 'needs_replacement', 'Требуется замена документов'
+        AWAITING_TRANSLATION = 'awaiting_translation', 'Ожидается перевод'
+        AWAITING_APPOINTMENT = 'awaiting_appointment', 'Ожидается запись в посольство'
+        APPOINTMENT_SCHEDULED = 'appointment_scheduled', 'Запись назначена'
+        READY_FOR_EMBASSY = 'ready_for_embassy', 'Готов к посольству'
+        DOCUMENTS_SUBMITTED = 'documents_submitted', 'Документы поданы'
+        AWAITING_DECISION = 'awaiting_decision', 'Ожидается решение'
+        VISA_APPROVED = 'visa_approved', 'Виза одобрена'
+        PASSPORT_RECEIVED = 'passport_received', 'Паспорт получен'
+        VISA_REJECTED = 'visa_rejected', 'Виза отклонена'
+        CANCELLED = 'cancelled', 'Заявка отменена'
+
+    # Personal data
+    first_name = models.CharField(max_length=150)
+    last_name = models.CharField(max_length=150)
+    middle_name = models.CharField(max_length=150, null=True, blank=True)
+    birth_date = models.DateField(null=True, blank=True)
+
+    # Contacts
+    phone = models.CharField(max_length=20, db_index=True)
+    email = models.EmailField(null=True, blank=True)
+    address = models.TextField(null=True, blank=True)
+
+    # Passport data
+    passport_number = models.CharField(max_length=50, null=True, blank=True, db_index=True)
+    passport_issue_date = models.DateField(null=True, blank=True)
+    passport_expiry_date = models.DateField(null=True, blank=True)
+    passport_issuing_authority = models.CharField(max_length=255, null=True, blank=True)
+
+    # Country and program
+    country = models.CharField(max_length=100, db_index=True, help_text="Страна поездки")
+    program_name = models.CharField(max_length=255, null=True, blank=True, help_text="Название программы, если не привязана к олимпиаде")
+    olympiad = models.ForeignKey('Olympiad', on_delete=models.SET_NULL, null=True, blank=True, related_name='visa_applicants')
+
+    # Payment
+    payment_required = models.BigIntegerField(default=0, help_text="Требуемая сумма оплаты, UZS")
+    payment_paid = models.BigIntegerField(default=0, help_text="Уже оплаченная сумма, UZS")
+
+    # Status & embassy
+    status = models.CharField(max_length=30, choices=Status.choices, default=Status.NEW, db_index=True)
+    embassy_appointment_date = models.DateTimeField(null=True, blank=True)
+
+    # Responsible staff
+    assigned_to = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_visa_applicants')
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='created_visa_applicants')
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Визовый участник"
+        verbose_name_plural = "Визовые участники"
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.last_name} {self.first_name} ({self.country})"
+
+    @property
+    def full_name(self):
+        return f"{self.last_name} {self.first_name} {self.middle_name or ''}".strip()
+
+    @property
+    def debt(self):
+        return max(0, self.payment_required - self.payment_paid)
+
+    @property
+    def has_expired_documents(self):
+        from django.utils import timezone
+        today = timezone.now().date()
+        return self.documents.filter(expiry_date__isnull=False, expiry_date__lt=today).exists()
+
+    @property
+    def has_documents_needing_replacement(self):
+        return self.documents.filter(needs_replacement=True).exists()
+
+
+class VisaDocument(models.Model):
+    class Category(models.TextChoices):
+        SCAN = 'scan', 'Скан документа'
+        PHOTO = 'photo', 'Фотография'
+        RECEIPT = 'receipt', 'Чек об оплате'
+        INVITATION = 'invitation', 'Приглашение'
+        QUESTIONNAIRE = 'questionnaire', 'Анкета'
+        TRANSLATION = 'translation', 'Перевод'
+        APPOINTMENT_CONFIRMATION = 'appointment_confirmation', 'Подтверждение записи'
+        READY_PACKAGE = 'ready_package', 'Готовый пакет документов'
+
+    applicant = models.ForeignKey(VisaApplicant, on_delete=models.CASCADE, related_name='documents')
+    category = models.CharField(max_length=30, choices=Category.choices)
+    file = models.FileField(upload_to='visa/documents/')
+    expiry_date = models.DateField(null=True, blank=True)
+    needs_replacement = models.BooleanField(default=False)
+    notes = models.CharField(max_length=255, null=True, blank=True)
+
+    previous_version = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True, related_name='next_versions')
+
+    uploaded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='uploaded_visa_documents')
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Визовый документ"
+        verbose_name_plural = "Визовые документы"
+        ordering = ['-uploaded_at']
+
+    def __str__(self):
+        return f"{self.get_category_display()} — {self.applicant.full_name}"
+
+    @property
+    def is_expired(self):
+        if not self.expiry_date:
+            return False
+        from django.utils import timezone
+        return self.expiry_date < timezone.now().date()
+
+
+class VisaNote(models.Model):
+    applicant = models.ForeignKey(VisaApplicant, on_delete=models.CASCADE, related_name='notes')
+    author = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='visa_notes')
+    text = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Заметка (виза)"
+        verbose_name_plural = "Заметки (виза)"
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Note on {self.applicant.full_name} by {self.author}"
+
+

@@ -27,3 +27,12 @@ class IsAdminOrCoordinatorReadOnly(permissions.BasePermission):
         if request.user.role == 'coordinator' and request.method in permissions.SAFE_METHODS:
             return True
         return False
+
+class IsAdminOrCoordinator(permissions.BasePermission):
+    """Суперадмины, админы и координаторы могут делать всё, остальные не могут ничего"""
+    def has_permission(self, request, view):
+        return (
+            request.user
+            and request.user.is_authenticated
+            and request.user.role in ['superadmin', 'admin', 'coordinator']
+        )

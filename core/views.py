@@ -16,21 +16,24 @@ from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 from rest_framework import response
 from payme import Payme
-from .serializers import (  
+from .serializers import (
     RegisterSerializer, UserSerializer, UserListSerializer, LoginRequestSerializer,
     OlympiadSerializer, SubOlympiadSerializer, SubOlympiadGradeSerializer,
     QuestionSerializer, QuestionExamSerializer, RegistrationSerializer,
     TestSerializer, NotificationSerializer, RegionSerializer, ExamResultSerializer,
     SupportTicketSerializer, TicketReplySerializer, EditRequestSerializer,
-    BookSerializer, BookOrderSerializer
+    BookSerializer, BookOrderSerializer,
+    VisaApplicantListSerializer, VisaApplicantDetailSerializer,
+    VisaDocumentSerializer, VisaNoteSerializer
 )
 from .models import (
     User, Olympiad, SubOlympiad, SubOlympiadGrade,
     Registration, ExamResult, Test, Question,
     Notification, Region, SupportTicket, TicketReply,
-    SMSSentHistory, ClickTransactions, EditRequest, Book, BookOrder
+    SMSSentHistory, ClickTransactions, EditRequest, Book, BookOrder,
+    VisaApplicant, VisaDocument, VisaNote
 )
-from .permissions import IsAdminUserOrReadOnly, IsAdminOrCoordinatorReadOnly
+from .permissions import IsAdminUserOrReadOnly, IsAdminOrCoordinatorReadOnly, IsAdminOrCoordinator
 from .utils_payme import get_payme_link
 from .utils_click import get_click_link
 from asgiref.sync import async_to_sync
@@ -2377,5 +2380,44 @@ class BookOrderViewSet(viewsets.ModelViewSet):
                 pass
 
         return Response({'success': True, 'status': order.status})
+
+
+class VisaApplicantViewSet(viewsets.ModelViewSet):
+    queryset = VisaApplicant.objects.all().select_related('assigned_to', 'olympiad', 'created_by').prefetch_related('documents', 'notes')
+    permission_classes = (IsAdminOrCoordinator,)
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['status', 'country', 'assigned_to', 'olympiad']
+    search_fields = ['first_name', 'last_name', 'middle_name', 'phone', 'passport_number', 'email']
+    ordering_fields = ['created_at', 'updated_at', 'embassy_appointment_date']
+
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return VisaApplicantListSerializer
+        return VisaApplicantDetailSerializer
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
+
+
+class VisaDocumentViewSet(viewsets.ModelViewSet):
+    queryset = VisaDocument.objects.all().select_related('uploaded_by')
+    serializer_class = VisaDocumentSerializer
+    permission_classes = (IsAdminOrCoordinator,)
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['applicant', 'category', 'needs_replacement']
+
+    def perform_create(self, serializer):
+        serializer.save(uploaded_by=self.request.user)
+
+
+class VisaNoteViewSet(viewsets.ModelViewSet):
+    queryset = VisaNote.objects.all().select_related('author')
+    serializer_class = VisaNoteSerializer
+    permission_classes = (IsAdminOrCoordinator,)
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['applicant']
+
+    def perform_create(self, serializer):
+        serializer.save(author=self.request.user)
 
 

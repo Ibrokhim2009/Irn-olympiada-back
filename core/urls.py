@@ -20,7 +20,8 @@ from .views import (
     SupportTicketViewSet, TicketReplyViewSet,
     SMSTemplateView, SMSSendView, SMSBalanceView, SMSSentHistoryView,
     TelegramWebhookView, EditRequestViewSet, BookViewSet,
-    TelegramUsersListView, TelegramBroadcastView, BookOrderViewSet
+    TelegramUsersListView, TelegramBroadcastView, BookOrderViewSet,
+    VisaApplicantViewSet, VisaDocumentViewSet, VisaNoteViewSet
 )
 
 schema_view = get_schema_view(
@@ -50,6 +51,9 @@ router.register(r'support/replies', TicketReplyViewSet, basename='support-replie
 router.register(r'edit-requests', EditRequestViewSet, basename='edit-requests')
 router.register(r'books', BookViewSet, basename='books')
 router.register(r'book-orders', BookOrderViewSet, basename='book-orders')
+router.register(r'visa/applicants', VisaApplicantViewSet, basename='visa-applicants')
+router.register(r'visa/documents', VisaDocumentViewSet, basename='visa-documents')
+router.register(r'visa/notes', VisaNoteViewSet, basename='visa-notes')
 
 urlpatterns = [
     path('auth/register/', RegisterView.as_view(), name='register'),
