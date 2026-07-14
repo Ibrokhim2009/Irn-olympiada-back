@@ -74,6 +74,9 @@ class User(AbstractUser):
     
     last_activity = models.DateTimeField(null=True, blank=True, db_index=True)
 
+    totp_secret = models.CharField(max_length=64, null=True, blank=True)
+    totp_enabled = models.BooleanField(default=False)
+
     REQUIRED_FIELDS = ['phone', 'role', 'teacher_name', 'teacher_phone']
     objects = UserManager()
 
@@ -679,6 +682,20 @@ class VisaApplicant(models.Model):
     assigned_to = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_visa_applicants')
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='created_visa_applicants')
 
+    # Follow-up / travel logistics
+    class PassportLocation(models.TextChoices):
+        WITH_PARTICIPANT = 'with_participant', 'У участника'
+        OFFICE = 'office', 'В офисе'
+        COURIER = 'courier', 'У курьера'
+        EMBASSY = 'embassy', 'В посольстве'
+
+    last_contact_date = models.DateField(null=True, blank=True)
+    documents_verified = models.BooleanField(default=False)
+    ready_for_submission = models.BooleanField(default=False)
+    passport_original_location = models.CharField(max_length=20, choices=PassportLocation.choices, null=True, blank=True)
+    flight_date = models.DateTimeField(null=True, blank=True)
+    family_head = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True, related_name='family_members')
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -702,11 +719,23 @@ class VisaApplicant(models.Model):
     def has_expired_documents(self):
         from django.utils import timezone
         today = timezone.now().date()
-        return self.documents.filter(expiry_date__isnull=False, expiry_date__lt=today).exists()
+        return self.documents.filter(superseded=False, expiry_date__isnull=False, expiry_date__lt=today).exists()
 
     @property
     def has_documents_needing_replacement(self):
-        return self.documents.filter(needs_replacement=True).exists()
+        return self.documents.filter(superseded=False, needs_replacement=True).exists()
+
+    @property
+    def readiness_score(self):
+        checks = [
+            self.debt <= 0,
+            not self.has_expired_documents,
+            not self.has_documents_needing_replacement,
+            self.documents_verified,
+            self.embassy_appointment_date is not None,
+            self.ready_for_submission,
+        ]
+        return round(100 * sum(1 for c in checks if c) / len(checks))
 
 
 class VisaDocument(models.Model):
@@ -728,6 +757,7 @@ class VisaDocument(models.Model):
     notes = models.CharField(max_length=255, null=True, blank=True)
 
     previous_version = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True, related_name='next_versions')
+    superseded = models.BooleanField(default=False)
 
     uploaded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='uploaded_visa_documents')
     uploaded_at = models.DateTimeField(auto_now_add=True)
@@ -761,5 +791,47 @@ class VisaNote(models.Model):
 
     def __str__(self):
         return f"Note on {self.applicant.full_name} by {self.author}"
+
+
+class VisaTask(models.Model):
+    applicant = models.ForeignKey(VisaApplicant, on_delete=models.CASCADE, related_name='tasks')
+    title = models.CharField(max_length=255)
+    due_date = models.DateField(null=True, blank=True)
+    done = models.BooleanField(default=False)
+    assigned_to = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='visa_tasks')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Задача (виза)"
+        verbose_name_plural = "Задачи (виза)"
+        ordering = ['done', 'due_date', '-created_at']
+
+    def __str__(self):
+        return f"{self.title} — {self.applicant.full_name}"
+
+
+class VisaAuditLog(models.Model):
+    class Action(models.TextChoices):
+        CREATED = 'created', 'Создан'
+        UPDATED = 'updated', 'Изменён'
+        STATUS_CHANGED = 'status_changed', 'Статус изменён'
+        DOCUMENT_UPLOADED = 'document_uploaded', 'Документ загружен'
+        DOCUMENT_DELETED = 'document_deleted', 'Документ удалён'
+        NOTE_ADDED = 'note_added', 'Заметка добавлена'
+        TASK_DONE = 'task_done', 'Задача выполнена'
+
+    applicant = models.ForeignKey(VisaApplicant, on_delete=models.CASCADE, related_name='audit_logs')
+    actor = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='visa_audit_actions')
+    action = models.CharField(max_length=30, choices=Action.choices)
+    detail = models.CharField(max_length=500, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Журнал действий (виза)"
+        verbose_name_plural = "Журнал действий (виза)"
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.get_action_display()} — {self.applicant.full_name}"
 
 

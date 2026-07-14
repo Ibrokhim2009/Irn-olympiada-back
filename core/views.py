@@ -1,9 +1,12 @@
 import hashlib
 import logging
+import pyotp
 import requests
 import threading
+from django.core import signing
 from django.conf import settings
 from django.db import models, transaction
+from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, status, permissions, viewsets
 from rest_framework.decorators import action
@@ -24,14 +27,14 @@ from .serializers import (
     SupportTicketSerializer, TicketReplySerializer, EditRequestSerializer,
     BookSerializer, BookOrderSerializer,
     VisaApplicantListSerializer, VisaApplicantDetailSerializer,
-    VisaDocumentSerializer, VisaNoteSerializer
+    VisaDocumentSerializer, VisaNoteSerializer, VisaTaskSerializer, VisaAuditLogSerializer
 )
 from .models import (
     User, Olympiad, SubOlympiad, SubOlympiadGrade,
     Registration, ExamResult, Test, Question,
     Notification, Region, SupportTicket, TicketReply,
     SMSSentHistory, ClickTransactions, EditRequest, Book, BookOrder,
-    VisaApplicant, VisaDocument, VisaNote
+    VisaApplicant, VisaDocument, VisaNote, VisaTask, VisaAuditLog
 )
 from .permissions import IsAdminUserOrReadOnly, IsAdminOrCoordinatorReadOnly, IsAdminOrCoordinator
 from .utils_payme import get_payme_link
@@ -275,6 +278,10 @@ class LoginView(APIView):
                     pass
 
         if user:
+            if user.totp_enabled:
+                pre_auth_token = signing.dumps({'user_id': user.id}, salt='visa-2fa-login')
+                return Response({'requires_2fa': True, 'pre_auth_token': pre_auth_token})
+
             refresh = RefreshToken.for_user(user)
             return Response({
                 'user': UserSerializer(user).data,
@@ -283,6 +290,73 @@ class LoginView(APIView):
             })
 
         return Response({'error': 'Invalid username or password'}, status=status.HTTP_401_UNAUTHORIZED)
+
+
+class TwoFactorVerifyView(APIView):
+    permission_classes = (permissions.AllowAny,)
+
+    def post(self, request):
+        pre_auth_token = request.data.get('pre_auth_token')
+        code = request.data.get('code')
+        if not pre_auth_token or not code:
+            return Response({'error': 'pre_auth_token and code are required'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            payload = signing.loads(pre_auth_token, salt='visa-2fa-login', max_age=300)
+        except signing.BadSignature:
+            return Response({'error': 'Invalid or expired login attempt'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            user = User.objects.get(id=payload['user_id'], totp_enabled=True)
+        except User.DoesNotExist:
+            return Response({'error': 'Invalid or expired login attempt'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not pyotp.TOTP(user.totp_secret).verify(code, valid_window=1):
+            return Response({'error': 'Invalid code'}, status=status.HTTP_400_BAD_REQUEST)
+
+        refresh = RefreshToken.for_user(user)
+        return Response({
+            'user': UserSerializer(user).data,
+            'refresh': str(refresh),
+            'access': str(refresh.access_token),
+        })
+
+
+class TwoFactorSetupView(APIView):
+    permission_classes = (permissions.IsAuthenticated,)
+
+    def post(self, request):
+        secret = pyotp.random_base32()
+        request.user.totp_secret = secret
+        request.user.save(update_fields=['totp_secret'])
+        otpauth_url = pyotp.TOTP(secret).provisioning_uri(name=request.user.username, issuer_name="IRN Olympiads")
+        return Response({'secret': secret, 'otpauth_url': otpauth_url})
+
+
+class TwoFactorConfirmView(APIView):
+    permission_classes = (permissions.IsAuthenticated,)
+
+    def post(self, request):
+        code = request.data.get('code')
+        if not request.user.totp_secret or not code:
+            return Response({'error': 'code is required'}, status=status.HTTP_400_BAD_REQUEST)
+        if not pyotp.TOTP(request.user.totp_secret).verify(code, valid_window=1):
+            return Response({'error': 'Invalid code'}, status=status.HTTP_400_BAD_REQUEST)
+        request.user.totp_enabled = True
+        request.user.save(update_fields=['totp_enabled'])
+        return Response({'success': True})
+
+
+class TwoFactorDisableView(APIView):
+    permission_classes = (permissions.IsAuthenticated,)
+
+    def post(self, request):
+        password = request.data.get('password')
+        if not password or not request.user.check_password(password):
+            return Response({'error': 'Invalid password'}, status=status.HTTP_400_BAD_REQUEST)
+        request.user.totp_enabled = False
+        request.user.totp_secret = None
+        request.user.save(update_fields=['totp_enabled', 'totp_secret'])
+        return Response({'success': True})
 
 
 class UserProfileView(generics.RetrieveUpdateAPIView):
@@ -2382,8 +2456,12 @@ class BookOrderViewSet(viewsets.ModelViewSet):
         return Response({'success': True, 'status': order.status})
 
 
+def _log_visa_action(applicant, actor, action, detail=''):
+    VisaAuditLog.objects.create(applicant=applicant, actor=actor if actor and actor.is_authenticated else None, action=action, detail=detail[:500])
+
+
 class VisaApplicantViewSet(viewsets.ModelViewSet):
-    queryset = VisaApplicant.objects.all().select_related('assigned_to', 'olympiad', 'created_by').prefetch_related('documents', 'notes')
+    queryset = VisaApplicant.objects.all().select_related('assigned_to', 'olympiad', 'created_by', 'family_head').prefetch_related('documents', 'notes', 'tasks', 'audit_logs')
     permission_classes = (IsAdminOrCoordinator,)
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['status', 'country', 'assigned_to', 'olympiad']
@@ -2396,7 +2474,58 @@ class VisaApplicantViewSet(viewsets.ModelViewSet):
         return VisaApplicantDetailSerializer
 
     def perform_create(self, serializer):
-        serializer.save(created_by=self.request.user)
+        applicant = serializer.save(created_by=self.request.user)
+        _log_visa_action(applicant, self.request.user, VisaAuditLog.Action.CREATED)
+
+    def perform_update(self, serializer):
+        old_status = serializer.instance.status
+        applicant = serializer.save()
+        if applicant.status != old_status:
+            _log_visa_action(applicant, self.request.user, VisaAuditLog.Action.STATUS_CHANGED,
+                              f"{old_status} -> {applicant.status}")
+        else:
+            _log_visa_action(applicant, self.request.user, VisaAuditLog.Action.UPDATED)
+
+    @action(detail=False, methods=['post'])
+    def bulk_update_status(self, request):
+        ids = request.data.get('ids', [])
+        new_status = request.data.get('status')
+        if not ids or new_status not in VisaApplicant.Status.values:
+            return Response({'detail': 'ids and a valid status are required'}, status=status.HTTP_400_BAD_REQUEST)
+        applicants = VisaApplicant.objects.filter(id__in=ids)
+        count = 0
+        for applicant in applicants:
+            old_status = applicant.status
+            applicant.status = new_status
+            applicant.save(update_fields=['status', 'updated_at'])
+            _log_visa_action(applicant, request.user, VisaAuditLog.Action.STATUS_CHANGED, f"{old_status} -> {new_status}")
+            count += 1
+        return Response({'updated': count})
+
+    @action(detail=False, methods=['post'])
+    def bulk_assign(self, request):
+        ids = request.data.get('ids', [])
+        assigned_to_id = request.data.get('assigned_to')
+        if not ids:
+            return Response({'detail': 'ids is required'}, status=status.HTTP_400_BAD_REQUEST)
+        count = VisaApplicant.objects.filter(id__in=ids).update(assigned_to_id=assigned_to_id or None)
+        for applicant in VisaApplicant.objects.filter(id__in=ids):
+            _log_visa_action(applicant, request.user, VisaAuditLog.Action.UPDATED, "Reassigned")
+        return Response({'updated': count})
+
+    @action(detail=False, methods=['post'])
+    def bulk_create(self, request):
+        rows = request.data.get('rows', [])
+        created, errors = [], []
+        for idx, row in enumerate(rows):
+            serializer = VisaApplicantDetailSerializer(data=row, context={'request': request})
+            if serializer.is_valid():
+                applicant = serializer.save(created_by=request.user)
+                _log_visa_action(applicant, request.user, VisaAuditLog.Action.CREATED, "Imported from Excel")
+                created.append(applicant.id)
+            else:
+                errors.append({'row': idx, 'errors': serializer.errors})
+        return Response({'created': created, 'errors': errors})
 
 
 class VisaDocumentViewSet(viewsets.ModelViewSet):
@@ -2407,7 +2536,25 @@ class VisaDocumentViewSet(viewsets.ModelViewSet):
     filterset_fields = ['applicant', 'category', 'needs_replacement']
 
     def perform_create(self, serializer):
-        serializer.save(uploaded_by=self.request.user)
+        applicant = serializer.validated_data.get('applicant')
+        category = serializer.validated_data.get('category')
+        previous = VisaDocument.objects.filter(applicant=applicant, category=category, superseded=False).first()
+        document = serializer.save(uploaded_by=self.request.user, previous_version=previous)
+        if previous:
+            previous.superseded = True
+            previous.save(update_fields=['superseded'])
+        _log_visa_action(applicant, self.request.user, VisaAuditLog.Action.DOCUMENT_UPLOADED, document.get_category_display())
+
+    def perform_destroy(self, instance):
+        _log_visa_action(instance.applicant, self.request.user, VisaAuditLog.Action.DOCUMENT_DELETED, instance.get_category_display())
+        instance.delete()
+
+    @action(detail=True, methods=['get'])
+    def download(self, request, pk=None):
+        document = self.get_object()
+        if not document.file:
+            raise Http404
+        return FileResponse(document.file.open('rb'), as_attachment=True, filename=document.file.name.split('/')[-1])
 
 
 class VisaNoteViewSet(viewsets.ModelViewSet):
@@ -2418,6 +2565,28 @@ class VisaNoteViewSet(viewsets.ModelViewSet):
     filterset_fields = ['applicant']
 
     def perform_create(self, serializer):
-        serializer.save(author=self.request.user)
+        note = serializer.save(author=self.request.user)
+        _log_visa_action(note.applicant, self.request.user, VisaAuditLog.Action.NOTE_ADDED, note.text[:200])
+
+
+class VisaTaskViewSet(viewsets.ModelViewSet):
+    queryset = VisaTask.objects.all().select_related('assigned_to')
+    serializer_class = VisaTaskSerializer
+    permission_classes = (IsAdminOrCoordinator,)
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['applicant', 'done']
+
+    def perform_update(self, serializer):
+        task = serializer.save()
+        if task.done:
+            _log_visa_action(task.applicant, self.request.user, VisaAuditLog.Action.TASK_DONE, task.title)
+
+
+class VisaAuditLogViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = VisaAuditLog.objects.all().select_related('actor')
+    serializer_class = VisaAuditLogSerializer
+    permission_classes = (IsAdminOrCoordinator,)
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['applicant']
 
 

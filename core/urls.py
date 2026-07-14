@@ -21,7 +21,8 @@ from .views import (
     SMSTemplateView, SMSSendView, SMSBalanceView, SMSSentHistoryView,
     TelegramWebhookView, EditRequestViewSet, BookViewSet,
     TelegramUsersListView, TelegramBroadcastView, BookOrderViewSet,
-    VisaApplicantViewSet, VisaDocumentViewSet, VisaNoteViewSet
+    VisaApplicantViewSet, VisaDocumentViewSet, VisaNoteViewSet, VisaTaskViewSet, VisaAuditLogViewSet,
+    TwoFactorVerifyView, TwoFactorSetupView, TwoFactorConfirmView, TwoFactorDisableView
 )
 
 schema_view = get_schema_view(
@@ -54,10 +55,16 @@ router.register(r'book-orders', BookOrderViewSet, basename='book-orders')
 router.register(r'visa/applicants', VisaApplicantViewSet, basename='visa-applicants')
 router.register(r'visa/documents', VisaDocumentViewSet, basename='visa-documents')
 router.register(r'visa/notes', VisaNoteViewSet, basename='visa-notes')
+router.register(r'visa/tasks', VisaTaskViewSet, basename='visa-tasks')
+router.register(r'visa/audit-logs', VisaAuditLogViewSet, basename='visa-audit-logs')
 
 urlpatterns = [
     path('auth/register/', RegisterView.as_view(), name='register'),
     path('auth/login/', LoginView.as_view(), name='login_custom'),
+    path('auth/2fa/verify/', TwoFactorVerifyView.as_view(), name='2fa_verify'),
+    path('auth/2fa/setup/', TwoFactorSetupView.as_view(), name='2fa_setup'),
+    path('auth/2fa/confirm/', TwoFactorConfirmView.as_view(), name='2fa_confirm'),
+    path('auth/2fa/disable/', TwoFactorDisableView.as_view(), name='2fa_disable'),
     path('auth/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('auth/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('auth/profile/', UserProfileView.as_view(), name='profile'),

@@ -4,7 +4,7 @@ from .models import (
     Question, Test, Registration, ExamResult,
     Notification, Region, UserAchievement,
     SupportTicket, TicketReply, EditRequest, Book, BookOrder,
-    VisaApplicant, VisaDocument, VisaNote
+    VisaApplicant, VisaDocument, VisaNote, VisaTask, VisaAuditLog
 )
 import base64
 import uuid
@@ -217,7 +217,8 @@ class UserSerializer(serializers.ModelSerializer):
         fields = ('id', 'username', 'email', 'first_name', 'last_name', 'middle_name',
                   'phone', 'birth_date', 'region', 'school', 'grade', 'role', 'participant_id',
                   'teacher_name', 'teacher_phone', 'teachers', 'password_text', 'telegram_chat_id', 'password',
-                  'registrations', 'exam_results', 'notifications', 'achievements')
+                  'totp_enabled', 'registrations', 'exam_results', 'notifications', 'achievements')
+        read_only_fields = ('totp_enabled',)
 
     def create(self, validated_data):
         password = validated_data.pop('password', None)
@@ -587,9 +588,9 @@ class VisaDocumentSerializer(serializers.ModelSerializer):
         fields = (
             'id', 'applicant', 'category', 'category_display', 'file',
             'expiry_date', 'is_expired', 'needs_replacement', 'notes',
-            'previous_version', 'uploaded_by', 'uploaded_by_name', 'uploaded_at'
+            'previous_version', 'superseded', 'uploaded_by', 'uploaded_by_name', 'uploaded_at'
         )
-        read_only_fields = ('uploaded_by', 'uploaded_at')
+        read_only_fields = ('uploaded_by', 'uploaded_at', 'superseded', 'previous_version')
 
     def get_uploaded_by_name(self, obj):
         if not obj.uploaded_by:
@@ -611,12 +612,42 @@ class VisaNoteSerializer(serializers.ModelSerializer):
         return f"{obj.author.last_name} {obj.author.first_name}".strip() or obj.author.username
 
 
+class VisaTaskSerializer(serializers.ModelSerializer):
+    assigned_to_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = VisaTask
+        fields = ('id', 'applicant', 'title', 'due_date', 'done', 'assigned_to', 'assigned_to_name', 'created_at')
+        read_only_fields = ('created_at',)
+
+    def get_assigned_to_name(self, obj):
+        if not obj.assigned_to:
+            return None
+        return f"{obj.assigned_to.last_name} {obj.assigned_to.first_name}".strip() or obj.assigned_to.username
+
+
+class VisaAuditLogSerializer(serializers.ModelSerializer):
+    actor_name = serializers.SerializerMethodField()
+    action_display = serializers.CharField(source='get_action_display', read_only=True)
+
+    class Meta:
+        model = VisaAuditLog
+        fields = ('id', 'applicant', 'actor', 'actor_name', 'action', 'action_display', 'detail', 'created_at')
+
+    def get_actor_name(self, obj):
+        if not obj.actor:
+            return None
+        return f"{obj.actor.last_name} {obj.actor.first_name}".strip() or obj.actor.username
+
+
 class VisaApplicantListSerializer(serializers.ModelSerializer):
     full_name = serializers.ReadOnlyField()
     debt = serializers.ReadOnlyField()
+    readiness_score = serializers.ReadOnlyField()
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     assigned_to_name = serializers.SerializerMethodField()
     olympiad_title = serializers.SerializerMethodField()
+    family_head_name = serializers.SerializerMethodField()
     has_expired_documents = serializers.ReadOnlyField()
     has_documents_needing_replacement = serializers.ReadOnlyField()
 
@@ -626,8 +657,10 @@ class VisaApplicantListSerializer(serializers.ModelSerializer):
             'id', 'full_name', 'first_name', 'last_name', 'middle_name',
             'phone', 'email', 'country', 'program_name', 'olympiad', 'olympiad_title',
             'status', 'status_display', 'assigned_to', 'assigned_to_name',
-            'payment_required', 'payment_paid', 'debt',
+            'payment_required', 'payment_paid', 'debt', 'readiness_score',
             'embassy_appointment_date', 'has_expired_documents', 'has_documents_needing_replacement',
+            'last_contact_date', 'documents_verified', 'ready_for_submission',
+            'passport_original_location', 'flight_date', 'family_head', 'family_head_name',
             'created_at', 'updated_at'
         )
 
@@ -641,20 +674,61 @@ class VisaApplicantListSerializer(serializers.ModelSerializer):
             return None
         return obj.olympiad.title_ru or obj.olympiad.title_uz or obj.olympiad.title_en
 
+    def get_family_head_name(self, obj):
+        if not obj.family_head:
+            return None
+        return obj.family_head.full_name
+
 
 class VisaApplicantDetailSerializer(VisaApplicantListSerializer):
     documents = VisaDocumentSerializer(many=True, read_only=True)
     notes = VisaNoteSerializer(many=True, read_only=True)
+    tasks = VisaTaskSerializer(many=True, read_only=True)
     created_by_name = serializers.SerializerMethodField()
+    audit_logs = serializers.SerializerMethodField()
+    family_members = serializers.SerializerMethodField()
+    duplicate_warning = serializers.SerializerMethodField()
 
     class Meta(VisaApplicantListSerializer.Meta):
         fields = VisaApplicantListSerializer.Meta.fields + (
             'birth_date', 'address',
             'passport_number', 'passport_issue_date', 'passport_expiry_date', 'passport_issuing_authority',
-            'created_by', 'created_by_name', 'documents', 'notes'
+            'created_by', 'created_by_name', 'documents', 'notes', 'tasks', 'audit_logs',
+            'family_members', 'duplicate_warning'
         )
 
     def get_created_by_name(self, obj):
         if not obj.created_by:
             return None
         return f"{obj.created_by.last_name} {obj.created_by.first_name}".strip() or obj.created_by.username
+
+    def get_audit_logs(self, obj):
+        return VisaAuditLogSerializer(obj.audit_logs.all()[:50], many=True).data
+
+    def get_family_members(self, obj):
+        head_id = obj.family_head_id or obj.id
+        members = list(VisaApplicant.objects.filter(family_head_id=head_id).exclude(id=obj.id))
+        if obj.family_head_id:
+            head = VisaApplicant.objects.filter(id=head_id).first()
+            if head:
+                members.append(head)
+        return [
+            {'id': m.id, 'full_name': m.full_name, 'status': m.status, 'status_display': m.get_status_display(), 'country': m.country}
+            for m in members
+        ]
+
+    def get_duplicate_warning(self, obj):
+        qs = VisaApplicant.objects.exclude(id=obj.id).exclude(status='cancelled')
+        phone_dupe = bool(obj.phone) and qs.filter(phone=obj.phone).exists()
+        passport_dupe = bool(obj.passport_number) and qs.filter(passport_number=obj.passport_number).exists()
+        return phone_dupe or passport_dupe
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        request = self.context.get('request')
+        can_view_full_passport = bool(request) and getattr(request.user, 'role', None) in ('admin', 'superadmin')
+        data['can_view_full_passport'] = can_view_full_passport
+        if not can_view_full_passport and data.get('passport_number'):
+            pn = data['passport_number']
+            data['passport_number'] = (pn[:2] + '*' * (len(pn) - 4) + pn[-2:]) if len(pn) > 4 else '*' * len(pn)
+        return data
