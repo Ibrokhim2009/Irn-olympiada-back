@@ -35,7 +35,8 @@ CHANNELS_TEXT = (
     "📍 Surxondaryo va Qashqadaryo:\nhttps://t.me/IRN_Surkhandarya_Kashkadarya\n\n"
     "📍 Jizzax va Samarqand:\nhttps://t.me/IRNJizzakh_Samarkand\n\n"
     "📍 Navoiy va Buxoro:\nhttps://t.me/IRN_Navoi_Bukhara\n\n"
-    "Barcha yangiliklar va olimpiada sanalari ushbu guruhlarda e’lon qilinadi."
+    "📍 Andijon, Namangan va Fargʻona:\nhttps://t.me/Vodiy_IRN\n\n"
+    "📢 Barcha yangiliklar, olimpiada sanalari va muhim e’lonlar ushbu hududiy guruhlarda e’lon qilinadi."
 )
 
 def send_message(chat_id, text, reply_markup=None):
