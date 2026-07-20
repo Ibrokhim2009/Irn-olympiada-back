@@ -1,3 +1,4 @@
+import re
 import requests
 import os
 import datetime
@@ -210,17 +211,26 @@ def get_templates():
 
     now_iso = datetime.datetime.utcnow().isoformat() + 'Z'
     all_templates = []
+    eskiz_texts = set()  # only used to suppress a local draft once its Eskiz-approved twin exists
 
-    templates_dict = {}
-    
-    # Process Eskiz templates
+    # Process Eskiz templates. Each one keeps its own Eskiz id — two Eskiz templates that
+    # happen to share identical wording (e.g. the same message resubmitted for a different
+    # region/date) are still two real, independently-approved entries in Eskiz's own system,
+    # so they must NOT be merged into one just because their text matches.
     eskiz_templates = fetch_eskiz_templates()
     for t in eskiz_templates:
         text = t.get('template') or t.get('text') or ''
         clean_text = text.strip()
         if not clean_text:
             continue
-            
+
+        # Eskiz's raw 'template' field can contain unresolved variable placeholders
+        # (e.g. "%d", "%w{1,2}") for pattern-style templates — that's not real, sendable
+        # text and doesn't even appear on Eskiz's own "Мои тексты" dashboard, so skip it
+        # rather than surface it as something an admin could accidentally broadcast.
+        if re.search(r'%[a-zA-Z]', clean_text):
+            continue
+
         status = t.get('status') or 'approved'
         status_lower = str(status).lower()
         if 'approve' in status_lower or 'activ' in status_lower or 'одобрен' in status_lower or 'service' in status_lower:
@@ -231,7 +241,7 @@ def get_templates():
             status_mapped = 'rejected'
         else:
             status_mapped = status_lower
-            
+
         template_obj = {
             'id': t.get('id'),
             'text': text,
@@ -240,50 +250,28 @@ def get_templates():
             'note': t.get('note') or t.get('name') or '',
             'type': 'service'
         }
-        
-        existing = templates_dict.get(clean_text)
-        if not existing:
-            templates_dict[clean_text] = template_obj
-        else:
-            # Prioritize 'approved' status over others
-            if template_obj['status'] == 'approved' and existing['status'] != 'approved':
-                templates_dict[clean_text] = template_obj
-            elif template_obj['status'] == 'moderation' and existing['status'] == 'rejected':
-                templates_dict[clean_text] = template_obj
-                
-    # Process local templates
+        eskiz_texts.add(clean_text)
+        all_templates.append(template_obj)
+
+    # Process local (not-yet-submitted-or-approved) templates, skipping any whose text
+    # already matches an Eskiz entry — that means it graduated from local draft to an
+    # approved Eskiz template and shouldn't be shown twice.
     for t in local_templates:
         clean_text = t['text'].strip()
-        template_obj = t
-        
-        existing = templates_dict.get(clean_text)
-        if not existing:
-            templates_dict[clean_text] = template_obj
-        else:
-            # Prioritize 'approved' status over others
-            if template_obj.get('status') == 'approved' and existing['status'] != 'approved':
-                templates_dict[clean_text] = template_obj
-            elif template_obj.get('status') == 'moderation' and existing['status'] == 'rejected':
-                templates_dict[clean_text] = template_obj
+        if clean_text in eskiz_texts:
+            continue
+        all_templates.append(t)
 
-    seen_texts = set()
-    
-    # Add mapped/deduplicated templates from Eskiz and local storage
-    for clean_text, tpl in templates_dict.items():
-        if clean_text not in seen_texts:
-            seen_texts.add(clean_text)
-            all_templates.append(tpl)
-            
     # Sort templates by created_at descending (newest first)
     def get_sort_key(tpl):
         dt_str = tpl.get('created_at') or ''
         return dt_str.replace('T', ' ').replace('Z', '')
-        
+
     try:
         all_templates.sort(key=get_sort_key, reverse=True)
     except Exception:
         pass
-        
+
     return all_templates
 
 
