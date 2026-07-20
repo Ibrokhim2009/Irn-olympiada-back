@@ -1,4 +1,5 @@
 import hashlib
+import json
 import logging
 import pyotp
 import requests
@@ -2323,36 +2324,105 @@ class TelegramUsersListView(APIView):
 
 class TelegramBroadcastView(APIView):
     permission_classes = (permissions.IsAdminUser,)
+    BOT_TOKEN = "7361972097:AAFOiy-yKvejKL_nG4r9b7ecmj6TzJC655A"
 
-    @staticmethod
-    def _send_broadcast(chat_ids, message):
-        BOT_TOKEN = "7361972097:AAFOiy-yKvejKL_nG4r9b7ecmj6TzJC655A"
-        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    @classmethod
+    def _build_reply_markup(cls, buttons):
+        """Lays link buttons out two per row, matching the bot's existing payment-menu style."""
+        if not buttons:
+            return None
+        rows = []
+        row = []
+        for b in buttons:
+            text = (b.get('text') or '').strip()
+            url = (b.get('url') or '').strip()
+            if not text or not url:
+                continue
+            row.append({"text": text, "url": url})
+            if len(row) == 2:
+                rows.append(row)
+                row = []
+        if row:
+            rows.append(row)
+        return {"inline_keyboard": rows} if rows else None
+
+    @classmethod
+    def _send_broadcast(cls, chat_ids, message, image_bytes, image_name, reply_markup):
+        base_url = f"https://api.telegram.org/bot{cls.BOT_TOKEN}/"
+        file_id = None  # reuse Telegram's file_id after the first upload instead of re-uploading bytes per user
+
         for chat_id in chat_ids:
             try:
-                requests.post(url, json={
-                    "chat_id": chat_id,
-                    "text": message,
-                    "parse_mode": "HTML"
-                }, timeout=5)
+                if image_bytes:
+                    payload = {"chat_id": chat_id, "parse_mode": "HTML"}
+                    if message:
+                        payload["caption"] = message
+                    if reply_markup:
+                        payload["reply_markup"] = json.dumps(reply_markup)
+
+                    if file_id:
+                        payload["photo"] = file_id
+                        res = requests.post(base_url + "sendPhoto", data=payload, timeout=10)
+                    else:
+                        files = {"photo": (image_name or "image.jpg", image_bytes)}
+                        res = requests.post(base_url + "sendPhoto", data=payload, files=files, timeout=20)
+                        result = res.json()
+                        photos = result.get("result", {}).get("photo")
+                        if photos:
+                            file_id = photos[-1]["file_id"]
+                else:
+                    payload = {"chat_id": chat_id, "text": message, "parse_mode": "HTML"}
+                    if reply_markup:
+                        # requests(json=payload) already serializes the whole body to JSON,
+                        # so reply_markup must stay a plain dict here — pre-stringifying it
+                        # (like the multipart sendPhoto branch above needs) double-encodes it
+                        # and Telegram silently drops the keyboard.
+                        payload["reply_markup"] = reply_markup
+                    requests.post(base_url + "sendMessage", json=payload, timeout=5)
             except Exception:
                 pass
 
     def post(self, request):
         message = request.data.get('message', '').strip()
-        if not message:
-            return Response({'error': 'Message is required'}, status=400)
+        image = request.FILES.get('image')
 
-        chat_ids = list(
-            User.objects.filter(telegram_chat_id__isnull=False)
-            .exclude(telegram_chat_id='')
-            .values_list('telegram_chat_id', flat=True)
-        )
+        buttons_raw = request.data.get('buttons')
+        buttons = []
+        if buttons_raw:
+            try:
+                buttons = json.loads(buttons_raw) if isinstance(buttons_raw, str) else buttons_raw
+            except (TypeError, ValueError):
+                buttons = []
+
+        if not message and not image:
+            return Response({'error': 'Message or image is required'}, status=400)
+
+        reply_markup = self._build_reply_markup(buttons)
+
+        user_ids_raw = request.data.get('user_ids')
+        user_ids = []
+        if user_ids_raw:
+            try:
+                user_ids = json.loads(user_ids_raw) if isinstance(user_ids_raw, str) else user_ids_raw
+            except (TypeError, ValueError):
+                user_ids = []
+
+        recipients = User.objects.filter(telegram_chat_id__isnull=False).exclude(telegram_chat_id='')
+        if user_ids:
+            recipients = recipients.filter(id__in=user_ids)
+        chat_ids = list(recipients.values_list('telegram_chat_id', flat=True))
+
+        image_bytes = image.read() if image else None
+        image_name = image.name if image else None
 
         # Sending one-by-one to hundreds of users inside the request/response cycle
         # was blowing past the gateway timeout (504). Run it in the background instead
         # and return immediately.
-        threading.Thread(target=self._send_broadcast, args=(chat_ids, message), daemon=True).start()
+        threading.Thread(
+            target=self._send_broadcast,
+            args=(chat_ids, message, image_bytes, image_name, reply_markup),
+            daemon=True
+        ).start()
 
         return Response({
             'success': True,
