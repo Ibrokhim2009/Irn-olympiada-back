@@ -2351,7 +2351,7 @@ class TelegramBroadcastView(APIView):
     MAX_MEDIA_SIZE = 50 * 1024 * 1024  # 50MB — Telegram Bot API's own upload ceiling
 
     @classmethod
-    def _send_one(cls, base_url, chat_id, message, media_bytes, media_name, media_type, reply_markup, file_id_box):
+    def _send_one(cls, base_url, chat_id, message, media_bytes, media_name, media_type, reply_markup, file_id_box, video_meta=None):
         """Sends to a single chat_id. Returns (ok, error_description_or_None).
 
         media_type is 'photo', 'video', or None (text-only). When media is attached and
@@ -2369,6 +2369,15 @@ class TelegramBroadcastView(APIView):
                 media_payload = {"chat_id": chat_id, "parse_mode": "HTML"}
                 if is_video:
                     media_payload["supports_streaming"] = True
+                    # Without these, Telegram has to guess the aspect ratio from the raw
+                    # bytes and can render portrait video squeezed/cropped on mobile.
+                    if video_meta:
+                        if video_meta.get('width'):
+                            media_payload["width"] = video_meta['width']
+                        if video_meta.get('height'):
+                            media_payload["height"] = video_meta['height']
+                        if video_meta.get('duration'):
+                            media_payload["duration"] = video_meta['duration']
                 if message and caption_fits:
                     media_payload["caption"] = message
                 if reply_markup and caption_fits:
@@ -2419,12 +2428,12 @@ class TelegramBroadcastView(APIView):
             return False, str(e)
 
     @classmethod
-    def _send_broadcast(cls, chat_ids, message, media_bytes, media_name, media_type, reply_markup, results=None):
+    def _send_broadcast(cls, chat_ids, message, media_bytes, media_name, media_type, reply_markup, results=None, video_meta=None):
         base_url = f"https://api.telegram.org/bot{cls.BOT_TOKEN}/"
         file_id_box = {}  # reuse Telegram's file_id after the first upload instead of re-uploading bytes per user
 
         for chat_id in chat_ids:
-            ok, err = cls._send_one(base_url, chat_id, message, media_bytes, media_name, media_type, reply_markup, file_id_box)
+            ok, err = cls._send_one(base_url, chat_id, message, media_bytes, media_name, media_type, reply_markup, file_id_box, video_meta)
             if results is not None:
                 results.append({'chat_id': chat_id, 'ok': ok, 'error': err})
 
@@ -2451,6 +2460,19 @@ class TelegramBroadcastView(APIView):
         if media_file and media_file.size > self.MAX_MEDIA_SIZE:
             return Response({'error': f'File exceeds Telegram\'s {self.MAX_MEDIA_SIZE // (1024 * 1024)}MB upload limit'}, status=400)
 
+        video_meta = None
+        if media_type == 'video':
+            def _int_or_none(val):
+                try:
+                    return int(val)
+                except (TypeError, ValueError):
+                    return None
+            video_meta = {
+                'width': _int_or_none(request.data.get('video_width')),
+                'height': _int_or_none(request.data.get('video_height')),
+                'duration': _int_or_none(request.data.get('video_duration')),
+            }
+
         reply_markup = self._build_reply_markup(buttons)
 
         user_ids_raw = request.data.get('user_ids')
@@ -2476,7 +2498,7 @@ class TelegramBroadcastView(APIView):
             # Small/targeted sends (e.g. picking specific users) run synchronously so the
             # admin gets real per-recipient results back instead of a blind "started" message.
             results = []
-            self._send_broadcast(chat_ids, message, media_bytes, media_name, media_type, reply_markup, results)
+            self._send_broadcast(chat_ids, message, media_bytes, media_name, media_type, reply_markup, results, video_meta)
             sent = sum(1 for r in results if r['ok'])
             failures = [r for r in results if not r['ok']]
             return Response({
@@ -2494,7 +2516,7 @@ class TelegramBroadcastView(APIView):
         # and return immediately.
         threading.Thread(
             target=self._send_broadcast,
-            args=(chat_ids, message, media_bytes, media_name, media_type, reply_markup),
+            args=(chat_ids, message, media_bytes, media_name, media_type, reply_markup, None, video_meta),
             daemon=True
         ).start()
 
