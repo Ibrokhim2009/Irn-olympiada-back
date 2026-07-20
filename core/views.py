@@ -2347,35 +2347,67 @@ class TelegramBroadcastView(APIView):
         return {"inline_keyboard": rows} if rows else None
 
     SYNC_THRESHOLD = 25  # small/targeted sends run in-request so real per-user results can be returned
+    MEDIA_CAPTION_LIMIT = 1024  # Telegram's cap on a sendPhoto/sendVideo caption (sendMessage text allows 4096)
+    MAX_MEDIA_SIZE = 50 * 1024 * 1024  # 50MB — Telegram Bot API's own upload ceiling
 
     @classmethod
-    def _send_one(cls, base_url, chat_id, message, image_bytes, image_name, reply_markup, file_id_box):
-        """Sends to a single chat_id. Returns (ok, error_description_or_None)."""
+    def _send_one(cls, base_url, chat_id, message, media_bytes, media_name, media_type, reply_markup, file_id_box):
+        """Sends to a single chat_id. Returns (ok, error_description_or_None).
+
+        media_type is 'photo', 'video', or None (text-only). When media is attached and
+        the text is longer than Telegram's caption limit, the media goes out with no
+        caption and the full text follows as a separate message (with the buttons
+        attached there) — two bubbles, not a rejected API call.
+        """
         try:
-            if image_bytes:
-                payload = {"chat_id": chat_id, "parse_mode": "HTML"}
-                if message:
-                    payload["caption"] = message
-                if reply_markup:
-                    payload["reply_markup"] = json.dumps(reply_markup)
+            if media_bytes:
+                caption_fits = len(message) <= cls.MEDIA_CAPTION_LIMIT
+                is_video = media_type == 'video'
+                endpoint = "sendVideo" if is_video else "sendPhoto"
+                field_name = "video" if is_video else "photo"
+
+                media_payload = {"chat_id": chat_id, "parse_mode": "HTML"}
+                if is_video:
+                    media_payload["supports_streaming"] = True
+                if message and caption_fits:
+                    media_payload["caption"] = message
+                if reply_markup and caption_fits:
+                    media_payload["reply_markup"] = json.dumps(reply_markup)
 
                 if file_id_box.get('id'):
-                    payload["photo"] = file_id_box['id']
-                    res = requests.post(base_url + "sendPhoto", data=payload, timeout=10)
+                    media_payload[field_name] = file_id_box['id']
+                    res = requests.post(base_url + endpoint, data=media_payload, timeout=10)
                 else:
-                    files = {"photo": (image_name or "image.jpg", image_bytes)}
-                    res = requests.post(base_url + "sendPhoto", data=payload, files=files, timeout=20)
+                    default_name = "video.mp4" if is_video else "image.jpg"
+                    files = {field_name: (media_name or default_name, media_bytes)}
+                    res = requests.post(base_url + endpoint, data=media_payload, files=files, timeout=60 if is_video else 20)
                     data = res.json()
-                    photos = data.get("result", {}).get("photo")
-                    if photos:
-                        file_id_box['id'] = photos[-1]["file_id"]
+                    result_media = data.get("result", {}).get(field_name)
+                    if result_media:
+                        # sendPhoto returns a list of sizes (take the largest); sendVideo returns one object.
+                        file_id_box['id'] = result_media[-1]["file_id"] if isinstance(result_media, list) else result_media.get("file_id")
+
+                data = res.json()
+                if not data.get('ok'):
+                    return False, data.get('description', 'Unknown Telegram API error')
+
+                if message and not caption_fits:
+                    text_payload = {"chat_id": chat_id, "text": message, "parse_mode": "HTML"}
+                    if reply_markup:
+                        text_payload["reply_markup"] = reply_markup
+                    res = requests.post(base_url + "sendMessage", json=text_payload, timeout=5)
+                    data = res.json()
+                    if not data.get('ok'):
+                        return False, data.get('description', 'Unknown Telegram API error')
+
+                return True, None
             else:
                 payload = {"chat_id": chat_id, "text": message, "parse_mode": "HTML"}
                 if reply_markup:
                     # requests(json=payload) already serializes the whole body to JSON,
                     # so reply_markup must stay a plain dict here — pre-stringifying it
-                    # (like the multipart sendPhoto branch above needs) double-encodes it
-                    # and Telegram silently drops the keyboard.
+                    # (like the media branch above needs for its multipart request)
+                    # double-encodes it and Telegram silently drops the keyboard.
                     payload["reply_markup"] = reply_markup
                 res = requests.post(base_url + "sendMessage", json=payload, timeout=5)
 
@@ -2387,18 +2419,19 @@ class TelegramBroadcastView(APIView):
             return False, str(e)
 
     @classmethod
-    def _send_broadcast(cls, chat_ids, message, image_bytes, image_name, reply_markup, results=None):
+    def _send_broadcast(cls, chat_ids, message, media_bytes, media_name, media_type, reply_markup, results=None):
         base_url = f"https://api.telegram.org/bot{cls.BOT_TOKEN}/"
         file_id_box = {}  # reuse Telegram's file_id after the first upload instead of re-uploading bytes per user
 
         for chat_id in chat_ids:
-            ok, err = cls._send_one(base_url, chat_id, message, image_bytes, image_name, reply_markup, file_id_box)
+            ok, err = cls._send_one(base_url, chat_id, message, media_bytes, media_name, media_type, reply_markup, file_id_box)
             if results is not None:
                 results.append({'chat_id': chat_id, 'ok': ok, 'error': err})
 
     def post(self, request):
         message = request.data.get('message', '').strip()
         image = request.FILES.get('image')
+        video = request.FILES.get('video')
 
         buttons_raw = request.data.get('buttons')
         buttons = []
@@ -2408,8 +2441,15 @@ class TelegramBroadcastView(APIView):
             except (TypeError, ValueError):
                 buttons = []
 
-        if not message and not image:
-            return Response({'error': 'Message or image is required'}, status=400)
+        if not message and not image and not video:
+            return Response({'error': 'Message, image, or video is required'}, status=400)
+
+        # Video takes priority if somehow both are sent — a broadcast carries one attachment.
+        media_file = video or image
+        media_type = 'video' if video else ('photo' if image else None)
+
+        if media_file and media_file.size > self.MAX_MEDIA_SIZE:
+            return Response({'error': f'File exceeds Telegram\'s {self.MAX_MEDIA_SIZE // (1024 * 1024)}MB upload limit'}, status=400)
 
         reply_markup = self._build_reply_markup(buttons)
 
@@ -2429,14 +2469,14 @@ class TelegramBroadcastView(APIView):
         if not chat_ids:
             return Response({'error': 'No matching recipients have a linked Telegram account'}, status=400)
 
-        image_bytes = image.read() if image else None
-        image_name = image.name if image else None
+        media_bytes = media_file.read() if media_file else None
+        media_name = media_file.name if media_file else None
 
         if len(chat_ids) <= self.SYNC_THRESHOLD:
             # Small/targeted sends (e.g. picking specific users) run synchronously so the
             # admin gets real per-recipient results back instead of a blind "started" message.
             results = []
-            self._send_broadcast(chat_ids, message, image_bytes, image_name, reply_markup, results)
+            self._send_broadcast(chat_ids, message, media_bytes, media_name, media_type, reply_markup, results)
             sent = sum(1 for r in results if r['ok'])
             failures = [r for r in results if not r['ok']]
             return Response({
@@ -2454,7 +2494,7 @@ class TelegramBroadcastView(APIView):
         # and return immediately.
         threading.Thread(
             target=self._send_broadcast,
-            args=(chat_ids, message, image_bytes, image_name, reply_markup),
+            args=(chat_ids, message, media_bytes, media_name, media_type, reply_markup),
             daemon=True
         ).start()
 
