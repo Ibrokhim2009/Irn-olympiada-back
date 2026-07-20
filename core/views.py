@@ -2346,41 +2346,55 @@ class TelegramBroadcastView(APIView):
             rows.append(row)
         return {"inline_keyboard": rows} if rows else None
 
+    SYNC_THRESHOLD = 25  # small/targeted sends run in-request so real per-user results can be returned
+
     @classmethod
-    def _send_broadcast(cls, chat_ids, message, image_bytes, image_name, reply_markup):
+    def _send_one(cls, base_url, chat_id, message, image_bytes, image_name, reply_markup, file_id_box):
+        """Sends to a single chat_id. Returns (ok, error_description_or_None)."""
+        try:
+            if image_bytes:
+                payload = {"chat_id": chat_id, "parse_mode": "HTML"}
+                if message:
+                    payload["caption"] = message
+                if reply_markup:
+                    payload["reply_markup"] = json.dumps(reply_markup)
+
+                if file_id_box.get('id'):
+                    payload["photo"] = file_id_box['id']
+                    res = requests.post(base_url + "sendPhoto", data=payload, timeout=10)
+                else:
+                    files = {"photo": (image_name or "image.jpg", image_bytes)}
+                    res = requests.post(base_url + "sendPhoto", data=payload, files=files, timeout=20)
+                    data = res.json()
+                    photos = data.get("result", {}).get("photo")
+                    if photos:
+                        file_id_box['id'] = photos[-1]["file_id"]
+            else:
+                payload = {"chat_id": chat_id, "text": message, "parse_mode": "HTML"}
+                if reply_markup:
+                    # requests(json=payload) already serializes the whole body to JSON,
+                    # so reply_markup must stay a plain dict here — pre-stringifying it
+                    # (like the multipart sendPhoto branch above needs) double-encodes it
+                    # and Telegram silently drops the keyboard.
+                    payload["reply_markup"] = reply_markup
+                res = requests.post(base_url + "sendMessage", json=payload, timeout=5)
+
+            data = res.json()
+            if data.get('ok'):
+                return True, None
+            return False, data.get('description', 'Unknown Telegram API error')
+        except Exception as e:
+            return False, str(e)
+
+    @classmethod
+    def _send_broadcast(cls, chat_ids, message, image_bytes, image_name, reply_markup, results=None):
         base_url = f"https://api.telegram.org/bot{cls.BOT_TOKEN}/"
-        file_id = None  # reuse Telegram's file_id after the first upload instead of re-uploading bytes per user
+        file_id_box = {}  # reuse Telegram's file_id after the first upload instead of re-uploading bytes per user
 
         for chat_id in chat_ids:
-            try:
-                if image_bytes:
-                    payload = {"chat_id": chat_id, "parse_mode": "HTML"}
-                    if message:
-                        payload["caption"] = message
-                    if reply_markup:
-                        payload["reply_markup"] = json.dumps(reply_markup)
-
-                    if file_id:
-                        payload["photo"] = file_id
-                        res = requests.post(base_url + "sendPhoto", data=payload, timeout=10)
-                    else:
-                        files = {"photo": (image_name or "image.jpg", image_bytes)}
-                        res = requests.post(base_url + "sendPhoto", data=payload, files=files, timeout=20)
-                        result = res.json()
-                        photos = result.get("result", {}).get("photo")
-                        if photos:
-                            file_id = photos[-1]["file_id"]
-                else:
-                    payload = {"chat_id": chat_id, "text": message, "parse_mode": "HTML"}
-                    if reply_markup:
-                        # requests(json=payload) already serializes the whole body to JSON,
-                        # so reply_markup must stay a plain dict here — pre-stringifying it
-                        # (like the multipart sendPhoto branch above needs) double-encodes it
-                        # and Telegram silently drops the keyboard.
-                        payload["reply_markup"] = reply_markup
-                    requests.post(base_url + "sendMessage", json=payload, timeout=5)
-            except Exception:
-                pass
+            ok, err = cls._send_one(base_url, chat_id, message, image_bytes, image_name, reply_markup, file_id_box)
+            if results is not None:
+                results.append({'chat_id': chat_id, 'ok': ok, 'error': err})
 
     def post(self, request):
         message = request.data.get('message', '').strip()
@@ -2412,8 +2426,28 @@ class TelegramBroadcastView(APIView):
             recipients = recipients.filter(id__in=user_ids)
         chat_ids = list(recipients.values_list('telegram_chat_id', flat=True))
 
+        if not chat_ids:
+            return Response({'error': 'No matching recipients have a linked Telegram account'}, status=400)
+
         image_bytes = image.read() if image else None
         image_name = image.name if image else None
+
+        if len(chat_ids) <= self.SYNC_THRESHOLD:
+            # Small/targeted sends (e.g. picking specific users) run synchronously so the
+            # admin gets real per-recipient results back instead of a blind "started" message.
+            results = []
+            self._send_broadcast(chat_ids, message, image_bytes, image_name, reply_markup, results)
+            sent = sum(1 for r in results if r['ok'])
+            failures = [r for r in results if not r['ok']]
+            return Response({
+                'success': True,
+                'sent': sent,
+                'failed': len(failures),
+                'errors': [f['error'] for f in failures[:5]],
+                'message': f'Sent to {sent}/{len(chat_ids)} recipient(s).' + (
+                    f' {len(failures)} failed.' if failures else ''
+                )
+            })
 
         # Sending one-by-one to hundreds of users inside the request/response cycle
         # was blowing past the gateway timeout (504). Run it in the background instead
