@@ -233,7 +233,12 @@ def get_templates():
 
         status = t.get('status') or 'approved'
         status_lower = str(status).lower()
-        if 'approve' in status_lower or 'activ' in status_lower or 'одобрен' in status_lower or 'service' in status_lower:
+        # Eskiz encodes the approval itself as the template's type — "service" for an
+        # approved service template, "reklama" for an approved advertising template.
+        # There's no separate generic "approved" value for ads, so it must be checked
+        # explicitly or every approved advertising template gets silently excluded
+        # anywhere that filters on status === 'approved' (e.g. the Send tab).
+        if 'approve' in status_lower or 'activ' in status_lower or 'одобрен' in status_lower or 'service' in status_lower or 'reklama' in status_lower or 'реклам' in status_lower:
             status_mapped = 'approved'
         elif 'moder' in status_lower or 'process' in status_lower or 'proccess' in status_lower or 'модераци' in status_lower or 'процесс' in status_lower or status_lower == 'inproccess':
             status_mapped = 'moderation'
@@ -242,13 +247,15 @@ def get_templates():
         else:
             status_mapped = status_lower
 
+        template_type = 'advertising' if ('reklama' in status_lower or 'реклам' in status_lower) else 'service'
+
         template_obj = {
             'id': t.get('id'),
             'text': text,
             'status': status_mapped,
             'created_at': t.get('created_at') or t.get('created_date') or now_iso,
             'note': t.get('note') or t.get('name') or '',
-            'type': 'service'
+            'type': template_type
         }
         eskiz_texts.add(clean_text)
         all_templates.append(template_obj)
