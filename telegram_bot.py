@@ -73,7 +73,7 @@ def get_keyboard():
             [
                 {
                     "text": "📚 Kitob do'koni / Магазин книг",
-                    "web_app": {"url": f"{MINI_APP_URL}/shop"}
+                    "web_app": {"url": f"{MINI_APP_URL}/shop?v=2"}
                 }
             ]
         ],
