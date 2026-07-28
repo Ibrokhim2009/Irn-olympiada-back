@@ -61,7 +61,11 @@ class User(AbstractUser):
     region = models.ForeignKey(Region, on_delete=models.SET_NULL, null=True, blank=True, related_name='users')
     school = models.CharField(max_length=255)
     grade = models.CharField(max_length=5, null=True, blank=True)
-    
+    # Academic-year start (e.g. 2026 for the 2026-2027 school year) the student last
+    # confirmed their grade in. Compared against the current academic year to prompt
+    # a "did you move up a grade?" confirmation once a new school year begins.
+    grade_confirmed_year = models.PositiveIntegerField(null=True, blank=True)
+
     participant_id = models.CharField(max_length=20, unique=True, null=True, blank=True, db_index=True)
     telegram_chat_id = models.CharField(max_length=100, null=True, blank=True, db_index=True)
     telegram_username = models.CharField(max_length=100, null=True, blank=True)

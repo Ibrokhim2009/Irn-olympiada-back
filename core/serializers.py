@@ -9,6 +9,16 @@ from .models import (
 import base64
 import uuid
 from django.core.files.base import ContentFile
+from django.utils import timezone
+
+
+def current_academic_year():
+    """Uzbekistan's school year starts September 1 — label it by its start year
+    (e.g. 2026 for the 2026-2027 year) so a simple integer comparison tells us
+    whether a student has rolled into a new school year since they last confirmed
+    their grade."""
+    now = timezone.now()
+    return now.year if now.month >= 9 else now.year - 1
 
 
 class RegistrationSerializer(serializers.ModelSerializer):
@@ -18,13 +28,24 @@ class RegistrationSerializer(serializers.ModelSerializer):
     status_label = serializers.SerializerMethodField()
     expires_at = serializers.DateTimeField(source='payment_deadline', read_only=True)
     seconds_left = serializers.ReadOnlyField()
+    # Exposed for the admin-facing registrations list (name + call button) — the
+    # registrant's own contact info wasn't available before, only the teacher's.
+    user_full_name = serializers.SerializerMethodField()
+    user_phone = serializers.ReadOnlyField(source='user.phone')
+    user_grade = serializers.ReadOnlyField(source='user.grade')
 
     class Meta:
         model = Registration
         fields = ('id', 'olympiad', 'olympiad_title', 'olympiad_type', 'price',
                   'registered_at', 'payment_status', 'status_label', 'transaction_id',
                   'teacher_name', 'teacher_phone', 'expires_at', 'seconds_left',
-                  'unique_participant_id')
+                  'unique_participant_id', 'user_full_name', 'user_phone', 'user_grade')
+
+    def get_user_full_name(self, obj):
+        try:
+            return f"{obj.user.last_name} {obj.user.first_name}".strip() or obj.user.username
+        except Exception:
+            return ""
 
     def get_status_label(self, obj):
         return obj.get_payment_status_display()
@@ -211,14 +232,23 @@ class UserSerializer(serializers.ModelSerializer):
     achievements = UserAchievementSerializer(many=True, read_only=True)
     password = serializers.CharField(write_only=True, required=False)
     school = serializers.CharField(required=False, allow_blank=True, default='')
+    needs_grade_confirmation = serializers.SerializerMethodField()
 
     class Meta:
         model = User
         fields = ('id', 'username', 'email', 'first_name', 'last_name', 'middle_name',
-                  'phone', 'birth_date', 'region', 'school', 'grade', 'role', 'participant_id',
+                  'phone', 'birth_date', 'region', 'school', 'grade', 'grade_confirmed_year',
+                  'needs_grade_confirmation', 'role', 'participant_id',
                   'teacher_name', 'teacher_phone', 'teachers', 'password_text', 'telegram_chat_id', 'password',
                   'totp_enabled', 'registrations', 'exam_results', 'notifications', 'achievements')
         read_only_fields = ('totp_enabled',)
+
+    def get_needs_grade_confirmation(self, obj):
+        # Only participants have a grade to track; a Kindergarten/11th grader who
+        # already graduated ('11+') doesn't need yearly re-confirmation either.
+        if obj.role != User.Role.PARTICIPANT or not obj.grade or obj.grade == '11+':
+            return False
+        return obj.grade_confirmed_year != current_academic_year()
 
     def create(self, validated_data):
         password = validated_data.pop('password', None)
@@ -266,6 +296,10 @@ class RegisterSerializer(serializers.ModelSerializer):
         if not validated_data.get('username'):
             import uuid
             validated_data['username'] = f"{validated_data.get('phone')}_{uuid.uuid4().hex[:8]}"
+        # A student who just registered already gave us their current grade — don't
+        # immediately nag them to "confirm" it again until the next school year.
+        if validated_data.get('grade'):
+            validated_data['grade_confirmed_year'] = current_academic_year()
         return User.objects.create_user(**validated_data, role=User.Role.PARTICIPANT)
 
 
@@ -407,16 +441,21 @@ class OlympiadSerializer(serializers.ModelSerializer):
         all_grades = SubOlympiadGrade.objects.filter(
             sub_olympiad__olympiad=olympiad
         ).values_list('grade', flat=True).distinct()
-        
-        # Convert to numbers and sort
+
+        # Numeric grades sort and store as numbers; non-numeric codes (e.g. "KG" for
+        # Kindergarten) are kept as-is instead of being silently dropped — they used to
+        # vanish from olympiad.grades entirely, making those sessions unmatchable/invisible
+        # anywhere that reads this field.
         numeric_grades = []
+        other_grades = []
         for g in all_grades:
             try:
                 numeric_grades.append(int(g))
-            except:
-                pass
-        
-        olympiad.grades = sorted(numeric_grades)
+            except (TypeError, ValueError):
+                if g:
+                    other_grades.append(str(g))
+
+        olympiad.grades = sorted(other_grades) + sorted(numeric_grades)
         Olympiad.objects.filter(pk=olympiad.pk).update(grades=olympiad.grades)
 
         # 3. Auto-populate unique participant IDs for existing registrations if enabled

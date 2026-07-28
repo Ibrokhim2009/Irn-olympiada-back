@@ -560,10 +560,11 @@ class RegistrationViewSet(viewsets.ModelViewSet):
                 payment_status=Registration.PaymentStatus.PENDING,
                 payment_deadline__lt=timezone.now()
             ).update(payment_status=Registration.PaymentStatus.EXPIRED)
-            return Registration.objects.filter(user=user).order_by('-registered_at')
-        
-        # Admins see everything
-        return Registration.objects.all().order_by('-registered_at')
+            return Registration.objects.filter(user=user).select_related('user', 'olympiad').order_by('-registered_at')
+
+        # Admins see everything. select_related avoids an N+1 query per row now that
+        # the serializer also exposes the registrant's own name/phone/grade.
+        return Registration.objects.all().select_related('user', 'olympiad').order_by('-registered_at')
 
     def perform_destroy(self, instance):
         user = self.request.user
