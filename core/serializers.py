@@ -39,7 +39,8 @@ class RegistrationSerializer(serializers.ModelSerializer):
         fields = ('id', 'olympiad', 'olympiad_title', 'olympiad_type', 'price',
                   'registered_at', 'payment_status', 'status_label', 'transaction_id',
                   'teacher_name', 'teacher_phone', 'expires_at', 'seconds_left',
-                  'unique_participant_id', 'user_full_name', 'user_phone', 'user_grade')
+                  'unique_participant_id', 'user_full_name', 'user_phone', 'user_grade',
+                  'last_called_at')
 
     def get_user_full_name(self, obj):
         try:

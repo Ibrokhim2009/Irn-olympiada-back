@@ -284,6 +284,8 @@ class Registration(models.Model):
     
     unique_participant_id = models.CharField(max_length=50, null=True, blank=True, unique=True, db_index=True, verbose_name="Уникальный ID участника для этой олимпиады")
 
+    last_called_at = models.DateTimeField(null=True, blank=True, verbose_name="Последний звонок")
+
     class Meta:
         verbose_name = "Регистрация"
         verbose_name_plural = "Регистрации"
