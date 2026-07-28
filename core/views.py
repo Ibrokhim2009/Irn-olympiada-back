@@ -1,9 +1,12 @@
 import hashlib
+import hmac
 import json
 import logging
 import pyotp
 import requests
 import threading
+import time
+from urllib.parse import parse_qsl
 from django.core import signing
 from django.conf import settings
 from django.db import models, transaction
@@ -291,6 +294,54 @@ class LoginView(APIView):
             })
 
         return Response({'error': 'Invalid username or password'}, status=status.HTTP_401_UNAUTHORIZED)
+
+
+class TelegramWebAppAuthView(APIView):
+    """Silently signs a user in from Telegram Mini App `initData`, matching
+    the numeric Telegram user id against User.telegram_chat_id (private bot
+    chats have chat.id == from.id, and telegram_chat_id is already populated
+    from that same value by telegram_bot.py's /start and contact-share flows)."""
+    permission_classes = (permissions.AllowAny,)
+    BOT_TOKEN = "7361972097:AAFOiy-yKvejKL_nG4r9b7ecmj6TzJC655A"
+
+    def post(self, request):
+        init_data = request.data.get('init_data')
+        if not init_data:
+            return Response({'error': 'init_data is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        pairs = dict(parse_qsl(init_data, keep_blank_values=True))
+        received_hash = pairs.pop('hash', None)
+        if not received_hash:
+            return Response({'error': 'Invalid init_data'}, status=status.HTTP_400_BAD_REQUEST)
+
+        data_check_string = '\n'.join(f'{k}={v}' for k, v in sorted(pairs.items()))
+        secret_key = hmac.new(b'WebAppData', self.BOT_TOKEN.encode(), hashlib.sha256).digest()
+        computed_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+
+        if not hmac.compare_digest(computed_hash, received_hash):
+            return Response({'error': 'Invalid init_data signature'}, status=status.HTTP_401_UNAUTHORIZED)
+
+        auth_date = int(pairs.get('auth_date', 0))
+        if auth_date <= 0 or time.time() - auth_date > 86400:
+            return Response({'error': 'init_data expired'}, status=status.HTTP_401_UNAUTHORIZED)
+
+        try:
+            tg_user = json.loads(pairs.get('user', '{}'))
+            tg_user_id = tg_user['id']
+        except (ValueError, KeyError):
+            return Response({'error': 'Invalid init_data user payload'}, status=status.HTTP_400_BAD_REQUEST)
+
+        user = User.objects.filter(telegram_chat_id=str(tg_user_id)).first()
+        if not user:
+            return Response({'linked': False})
+
+        refresh = RefreshToken.for_user(user)
+        return Response({
+            'linked': True,
+            'user': UserSerializer(user).data,
+            'refresh': str(refresh),
+            'access': str(refresh.access_token),
+        })
 
 
 class TwoFactorVerifyView(APIView):
@@ -2541,6 +2592,20 @@ class BookOrderViewSet(viewsets.ModelViewSet):
         if user.is_staff or user.role in ['admin', 'superadmin']:
             return BookOrder.objects.all().select_related('user', 'book')
         return BookOrder.objects.filter(user=user).select_related('user', 'book')
+
+    def perform_create(self, serializer):
+        from rest_framework.exceptions import ValidationError
+
+        book = serializer.validated_data['book']
+        amount = serializer.validated_data.get('amount') or 1
+
+        with transaction.atomic():
+            locked_book = Book.objects.select_for_update().get(id=book.id)
+            if amount > locked_book.remaining_stock():
+                raise ValidationError({'amount': 'Not enough stock'})
+            locked_book.stock -= amount
+            locked_book.save(update_fields=['stock'])
+            serializer.save(user=self.request.user, total_price=locked_book.price * amount)
 
     @action(detail=True, methods=['post'])
     def update_status(self, request, pk=None):

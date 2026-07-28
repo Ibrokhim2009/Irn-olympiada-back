@@ -4,7 +4,6 @@ import time
 import random
 import requests
 import django
-import uuid
 
 # Setup Django Environment
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'src.settings')
@@ -15,15 +14,10 @@ except Exception as e:
     print("Error:", e)
     sys.exit(1)
 
-from django.core.files.base import ContentFile
-from django.db import transaction
-from core.models import User, Book, BookOrder
+from core.models import User
 
 BOT_TOKEN = "7361972097:AAFOiy-yKvejKL_nG4r9b7ecmj6TzJC655A"
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/"
-
-# Memory state tracking for multi-step flows
-USER_STATES = {}
 
 # Regional groups text
 CHANNELS_TEXT = (
@@ -64,8 +58,10 @@ def delete_message(chat_id, message_id):
     except Exception as e:
         print(f"Error deleting message {message_id} in {chat_id}:", e)
 
+MINI_APP_URL = "https://irnolympiad.uz"
+
 def get_keyboard():
-    # Keyboard to request contact & book shop button
+    # Keyboard to request contact & open the book shop as a Telegram Mini App
     return {
         "keyboard": [
             [
@@ -76,7 +72,8 @@ def get_keyboard():
             ],
             [
                 {
-                    "text": "📚 Kitob do'koni / Магазин книг"
+                    "text": "📚 Kitob do'koni / Магазин книг",
+                    "web_app": {"url": f"{MINI_APP_URL}/books"}
                 }
             ]
         ],
@@ -200,337 +197,6 @@ def process_broadcast(chat_id, message_text):
 
     send_message(chat_id, f"Broadcast yakunlandi!\n✅ Muvaffaqiyatli: {success_count}/{total}")
 
-def process_books(chat_id):
-    # Check if user profile is linked
-    user = User.objects.filter(telegram_chat_id=str(chat_id)).first()
-    if not user:
-        send_message(chat_id, "Iltimos, avval telefon raqamingizni yuborib profilingizni bog'lang. / Пожалуйста, сначала привяжите ваш контакт.", reply_markup=get_keyboard())
-        return
-
-    books = Book.objects.filter(is_active=True, book_type='paid')
-    if not books.exists():
-        send_message(chat_id, "Hozircha sotuvda kitoblar yo'q. / В данный момент книг в продаже нет.", reply_markup=get_keyboard())
-        return
-        
-    send_message(chat_id, "📚 <b>Bizning kitoblarimiz / Наши книги:</b>\nTanlang / Выберите:")
-    
-    for book in books:
-        try:
-            title = book.title_uz or book.title_ru or book.title_en or 'Book'
-            desc = book.description_uz or book.description_ru or book.description_en or ""
-            price_val = book.price or 0
-            remaining = book.remaining_stock()
-            text = (
-                f"📖 <b>{title}</b>\n\n"
-                f"📝 {desc}\n\n"
-                f"💰 <b>Narxi / Цена:</b> {price_val:,} UZS\n"
-                f"📦 <b>Omborda / В наличии:</b> {remaining} ta / шт."
-            )
-
-            if remaining > 0:
-                reply_markup = {
-                    "inline_keyboard": [
-                        [{"text": "Sotib olish / Купить", "callback_data": f"buy_book:{book.id}"}]
-                    ]
-                }
-            else:
-                text += "\n\n❌ <b>Sotuvda yo'q / Нет в наличии</b>"
-                reply_markup = None
-            
-            sent_photo = False
-            if book.cover_image:
-                # Method A: Try sending photo via local file upload
-                try:
-                    img_path = book.cover_image.path
-                    if os.path.exists(img_path):
-                        with open(img_path, 'rb') as f:
-                            payload = {
-                                "chat_id": chat_id,
-                                "caption": text,
-                                "parse_mode": "HTML",
-                            }
-                            if reply_markup:
-                                payload["reply_markup"] = reply_markup
-                            files = {"photo": f}
-                            res = requests.post(API_URL + "sendPhoto", data=payload, files=files)
-                            if res.status_code == 200:
-                                sent_photo = True
-                except Exception as e:
-                    print(f"Failed local path upload for book {book.id}: {e}")
-                    
-                # Method B: Try sending photo via public URL
-                if not sent_photo:
-                    try:
-                        public_url = "https://x8k2m9f3.irnolympiad.uz" + book.cover_image.url
-                        payload = {
-                            "chat_id": chat_id,
-                            "photo": public_url,
-                            "caption": text,
-                            "parse_mode": "HTML",
-                        }
-                        if reply_markup:
-                            payload["reply_markup"] = reply_markup
-                        res = requests.post(API_URL + "sendPhoto", json=payload)
-                        if res.status_code == 200:
-                            sent_photo = True
-                    except Exception as e:
-                        print(f"Failed public URL send for book {book.id}: {e}")
-                        
-            if sent_photo:
-                time.sleep(0.2)
-                continue
-                
-            # Fallback to text message if photo could not be sent or cover_image is missing
-            send_message(chat_id, text, reply_markup=reply_markup)
-            time.sleep(0.2)
-        except Exception as err:
-            print(f"Error rendering book {book.id}: {err}")
-
-def process_callback_query(callback_query):
-    query_id = callback_query["id"]
-    chat_id = callback_query["message"]["chat"]["id"]
-    data = callback_query.get("data", "")
-    
-    # Answer callback query to stop loading spinner
-    try:
-        requests.post(API_URL + "answerCallbackQuery", json={"callback_query_id": query_id})
-    except Exception as e:
-        print("Error answering callback query:", e)
-        
-    if data.startswith("buy_book:"):
-        try:
-            book_id = int(data.split(":")[1])
-            book = Book.objects.filter(id=book_id).first()
-            if not book:
-                send_message(chat_id, "Kitob topilmadi. / Книга не найдена.")
-                return
-            
-            # Check if user profile is linked
-            user = User.objects.filter(telegram_chat_id=str(chat_id)).first()
-            if not user:
-                send_message(chat_id, "Iltimos, avval telefon raqamingizni yuborib profilingizni bog'lang. / Пожалуйста, сначала привяжите ваш контакт.")
-                return
-                
-            USER_STATES[chat_id] = {
-                "state": "SELECT_AMOUNT",
-                "book_id": book_id
-            }
-            
-            cancel_markup = {
-                "keyboard": [
-                    [{"text": "1"}, {"text": "2"}, {"text": "3"}],
-                    [{"text": "5"}, {"text": "❌ Bekor qilish / Отмена"}]
-                ],
-                "resize_keyboard": True,
-                "one_time_keyboard": True
-            }
-            
-            send_message(
-                chat_id, 
-                f"📖 <b>{book.title_uz or book.title_ru}</b>\n"
-                f"Narxi / Цена: {book.price:,} UZS\n\n"
-                f"Sotib olmoqchi bo'lgan kitoblar sonini tanlang yoki kiriting (masalan: 1, 2, 5):\n\n"
-                f"Выберите или введите количество книг, которые хотите купить:",
-                reply_markup=cancel_markup
-            )
-        except Exception as e:
-            print("Error in callback query buy_book:", e)
-
-def process_state_message(chat_id, message, state):
-    text = message.get("text", "").strip()
-    photo = message.get("photo")
-    document = message.get("document")
-    
-    if text == "❌ Bekor qilish / Отмена" or text == "/cancel":
-        USER_STATES.pop(chat_id, None)
-        send_message(chat_id, "Buyurtma bekor qilindi. / Заказ отменен.", reply_markup=get_keyboard())
-        return
-
-    current_state = state["state"]
-    
-    if current_state == "SELECT_AMOUNT":
-        try:
-            amount = int(text)
-            if amount <= 0:
-                raise ValueError()
-        except ValueError:
-            send_message(chat_id, "Iltimos, to'g'ri son kiriting (masalan: 1, 2, 5). / Пожалуйста, введите целое положительное число.")
-            return
-
-        book = Book.objects.filter(id=state["book_id"]).first()
-        if not book:
-            send_message(chat_id, "Kechirasiz, kitob topilmadi. / Извините, книга не найдена.", reply_markup=get_keyboard())
-            USER_STATES.pop(chat_id, None)
-            return
-
-        remaining = book.remaining_stock()
-        if amount > remaining:
-            send_message(
-                chat_id,
-                f"Kechirasiz, omborda faqat {remaining} ta kitob qoldi. Iltimos, kamroq son kiriting.\n"
-                f"Извините, на складе осталось только {remaining} шт. Пожалуйста, введите меньшее количество."
-            )
-            return
-
-        state["amount"] = amount
-        state["state"] = "ENTER_ADDRESS"
-        
-        cancel_markup = {
-            "keyboard": [
-                [{"text": "❌ Bekor qilish / Отмена"}]
-            ],
-            "resize_keyboard": True,
-            "one_time_keyboard": True
-        }
-        send_message(
-            chat_id,
-            "📍 Yetkazib berish manzilini kiriting (shahar/viloyat, tuman, ko'cha, uy raqami):\n\n"
-            "Введите адрес доставки (город, область, район, улица, дом):",
-            reply_markup=cancel_markup
-        )
-        
-    elif current_state == "ENTER_ADDRESS":
-        if not text:
-            send_message(chat_id, "Iltimos, manzilni matn ko'rinishida yuboring. / Пожалуйста, введите адрес текстом.")
-            return
-            
-        state["address"] = text
-        state["state"] = "WAIT_FOR_RECEIPT"
-        
-        try:
-            book = Book.objects.get(id=state["book_id"])
-        except Book.DoesNotExist:
-            send_message(chat_id, "Kechirasiz, kitob topilmadi. / Извините, книга не найдена.")
-            USER_STATES.pop(chat_id, None)
-            return
-            
-        total_price = book.price * state["amount"]
-        state["total_price"] = total_price
-        
-        checkout_text = (
-            f"📋 <b>Buyurtma tasdiqlash / Подтверждение заказа</b>\n\n"
-            f"📖 Kitob / Книга: <b>{book.title_uz or book.title_ru}</b>\n"
-            f"🔢 Soni / Количество: <b>{state['amount']} ta</b>\n"
-            f"💰 Narxi / Общая сумма: <b>{total_price:,} UZS</b>\n"
-            f"📍 Manzil / Адрес доставки: <b>{state['address']}</b>\n\n"
-            f"💳 <b>To'lov ma'lumotlari / Реквизиты для оплаты:</b>\n"
-            f"Karta raqami / Номер карты: <code>5614 6821 1094 2531</code> (Uzcard / Humo)\n"
-            f"Karta egasi / Получатель: <b>Botirova Mohinur</b>\n\n"
-            f"To'lovni amalga oshirgach, iltimos to'lov cheki (kvitansiya, skrinshot) rasmini yoki faylini shu yerga yuboring.\n\n"
-            f"После оплаты, пожалуйста, отправьте сюда фото или файл чека."
-        )
-        
-        cancel_markup = {
-            "keyboard": [
-                [{"text": "❌ Bekor qilish / Отмена"}]
-            ],
-            "resize_keyboard": True,
-            "one_time_keyboard": True
-        }
-        # Save the checkout message_id so we can delete it after receipt is received
-        checkout_msg_id = send_message(chat_id, checkout_text, reply_markup=cancel_markup)
-        state["checkout_msg_id"] = checkout_msg_id
-        
-    elif current_state == "WAIT_FOR_RECEIPT":
-        file_id = None
-        receipt_message_id = message.get("message_id")  # ID of user's receipt photo message
-        if photo:
-            file_id = photo[-1]["file_id"]
-        elif document and document.get("mime_type", "").startswith("image/"):
-            file_id = document["file_id"]
-            
-        if not file_id:
-            send_message(chat_id, "Iltimos, to'lov cheki rasmini (kvitansiyani) yuboring. / Пожалуйста, отправьте именно фото или скриншот чека.")
-            return
-            
-        send_message(chat_id, "Chek qabul qilinmoqda, iltimos kuting... / Чек обрабатывается, пожалуйста, подождите...")
-        
-        file_url_res = requests.get(API_URL + "getFile", params={"file_id": file_id})
-        if file_url_res.status_code != 200:
-            send_message(chat_id, "Telegram faylni yuklashda xatolik. / Ошибка загрузки файла из Telegram.")
-            return
-            
-        file_path = file_url_res.json().get("result", {}).get("file_path")
-        if not file_path:
-            send_message(chat_id, "Fayl yo'li aniqlanmadi. / Путь к файлу не найден.")
-            return
-            
-        download_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_path}"
-        img_res = requests.get(download_url)
-        if img_res.status_code != 200:
-            send_message(chat_id, "Faylni yuklab olishda xatolik. / Ошибка скачивания файла.")
-            return
-            
-        try:
-            user = User.objects.filter(telegram_chat_id=str(chat_id)).first()
-
-            with transaction.atomic():
-                # Lock the book row so concurrent orders can't oversell the same stock
-                book = Book.objects.select_for_update().get(id=state["book_id"])
-
-                if state["amount"] > book.stock:
-                    send_message(
-                        chat_id,
-                        "Kechirasiz, siz kutayotgan vaqtda bu kitob sotilib bo'ldi yoki qoldiq yetarli emas. Buyurtma bekor qilindi.\n"
-                        "Извините, пока вы ждали, книга закончилась или остатка недостаточно. Заказ отменен.",
-                        reply_markup=get_keyboard()
-                    )
-                    USER_STATES.pop(chat_id, None)
-                    return
-
-                book.stock -= state["amount"]
-                book.save(update_fields=["stock"])
-
-                order = BookOrder(
-                    user=user,
-                    book=book,
-                    amount=state["amount"],
-                    total_price=state["total_price"],
-                    delivery_address=state["address"],
-                    status=BookOrder.Status.PENDING
-                )
-                order.save()
-
-            # Save receipt image (outside the stock-locking transaction — this does network I/O)
-            filename = f"receipt_{uuid.uuid4().hex[:10]}.jpg"
-            order.receipt_image.save(filename, ContentFile(img_res.content), save=True)
-            
-            # Delete the checkout details message (card number etc.) for privacy
-            checkout_msg_id = state.get("checkout_msg_id")
-            USER_STATES.pop(chat_id, None)
-            
-            # Delete both: the checkout order summary message + the user's receipt photo
-            delete_message(chat_id, checkout_msg_id)
-            delete_message(chat_id, receipt_message_id)
-            
-            success_msg = (
-                f"✅ <b>Rahmat! Buyurtmangiz qabul qilindi / Спасибо! Ваш заказ принят.</b>\n\n"
-                f"📦 Buyurtma ID: #{order.id}\n"
-                f"Tez orada administrator to'lovni tekshiradi va sizga xabar yuboradi.\n\n"
-                f"Администратор скоро проверит оплату и вам придет уведомление."
-            )
-            send_message(chat_id, success_msg, reply_markup=get_keyboard())
-            
-            # Notify admins
-            admins = User.objects.filter(role__in=['admin', 'superadmin']).exclude(telegram_chat_id__isnull=True).exclude(telegram_chat_id='')
-            admin_msg = (
-                f"🔔 <b>Yangi buyurtma! / Новый заказ!</b>\n\n"
-                f"📦 Buyurtma ID: #{order.id}\n"
-                f"👤 Xaridor / Покупатель: {user.last_name} {user.first_name} (@{user.username or ''})\n"
-                f"📞 Tel: {user.phone}\n"
-                f"📖 Kitob: {book.title_uz or book.title_ru}\n"
-                f"🔢 Soni: {order.amount} ta\n"
-                f"💰 Jami: {order.total_price:,} UZS\n"
-                f"📍 Manzil: {order.delivery_address}\n\n"
-                f"Admin panel orqali tasdiqlashingiz mumkin."
-            )
-            for admin in admins:
-                send_message(admin.telegram_chat_id, admin_msg)
-                
-        except Exception as e:
-            print("Failed to save book order:", e)
-            send_message(chat_id, "Tizim xatoligi, buyurtma saqlanmadi. / Системная ошибка, заказ не сохранен.")
-
 def main():
     print("Telegram Bot daemon started polling...")
     offset = 0
@@ -549,12 +215,6 @@ def main():
                 # A bug in handling one update should never stop the rest of the
                 # batch from being processed (or take down the whole bot).
                 try:
-                    # Check for callback query
-                    callback_query = update.get("callback_query")
-                    if callback_query:
-                        process_callback_query(callback_query)
-                        continue
-
                     message = update.get("message")
                     if not message:
                         continue
@@ -563,11 +223,6 @@ def main():
                     text = message.get("text", "")
                     contact = message.get("contact")
 
-                    # If user is in middle of a multi-step order flow
-                    if chat_id in USER_STATES:
-                        process_state_message(chat_id, message, USER_STATES[chat_id])
-                        continue
-
                     if text.startswith("/start"):
                         parts = text.split(maxsplit=1)
                         payload = parts[1] if len(parts) > 1 else None
@@ -575,9 +230,6 @@ def main():
 
                     elif text.startswith("/broadcast"):
                         process_broadcast(chat_id, text)
-
-                    elif text.startswith("/books") or text == "📚 Kitob do'koni / Магазин книг":
-                        process_books(chat_id)
 
                     elif contact:
                         process_contact(chat_id, contact)

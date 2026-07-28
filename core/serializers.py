@@ -610,6 +610,7 @@ class BookOrderSerializer(serializers.ModelSerializer):
         model = BookOrder
         fields = ('id', 'user', 'user_name', 'user_phone', 'book', 'book_title_ru', 'book_title_uz', 'book_title_en',
                   'amount', 'total_price', 'delivery_address', 'receipt_image', 'status', 'rejection_reason', 'created_at', 'updated_at')
+        read_only_fields = ('user', 'total_price')
 
     def get_user_name(self, obj):
         try:

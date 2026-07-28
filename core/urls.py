@@ -12,7 +12,7 @@ from .views import (
     OlympiadViewSet, SubOlympiadViewSet, SubOlympiadGradeViewSet,
     RegisterForOlympiadView,
     ExamView, SubmitResultView, ResultAnalysisView, PersonalResultsListView, AllResultsListView,
-    RegisterView, LoginView, UserProfileView,
+    RegisterView, LoginView, TelegramWebAppAuthView, UserProfileView,
     TestViewSet, QuestionViewSet, UserViewSet,
     RegistrationViewSet, PaymeCallbackView, ClickCallbackView, GetPaymeLinkView, GetClickLinkView,
     NotificationViewSet, SeedNotificationsView, SendNotificationView,
@@ -61,6 +61,7 @@ router.register(r'visa/audit-logs', VisaAuditLogViewSet, basename='visa-audit-lo
 urlpatterns = [
     path('auth/register/', RegisterView.as_view(), name='register'),
     path('auth/login/', LoginView.as_view(), name='login_custom'),
+    path('auth/telegram-webapp/', TelegramWebAppAuthView.as_view(), name='telegram_webapp_auth'),
     path('auth/2fa/verify/', TwoFactorVerifyView.as_view(), name='2fa_verify'),
     path('auth/2fa/setup/', TwoFactorSetupView.as_view(), name='2fa_setup'),
     path('auth/2fa/confirm/', TwoFactorConfirmView.as_view(), name='2fa_confirm'),
