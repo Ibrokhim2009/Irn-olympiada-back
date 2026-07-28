@@ -75,6 +75,11 @@ def get_keyboard():
                     "text": "📚 Kitob do'koni / Магазин книг",
                     "web_app": {"url": f"{MINI_APP_URL}/shop?v=2"}
                 }
+            ],
+            [
+                {
+                    "text": "🌐 Hududiy guruhlar / Региональные группы"
+                }
             ]
         ],
         "resize_keyboard": True,
@@ -234,11 +239,15 @@ def main():
                     elif contact:
                         process_contact(chat_id, contact)
 
+                    elif text == "🌐 Hududiy guruhlar / Региональные группы":
+                        send_message(chat_id, CHANNELS_TEXT)
+
                     elif text:
                         help_text = (
                             "Profilingizni bog'lash uchun shaxsiy kabinetdagi havoladan o'ting. "
                             "Parolni tiklash va profilingizni ulash uchun quyidagi 'Telefon raqamni yuborish' tugmasini bosing.\n\n"
-                            "Kitoblar xarid qilish uchun <b>📚 Kitob do'koni / Магазин книг</b> tugmasini bosing."
+                            "Kitoblar xarid qilish uchun <b>📚 Kitob do'koni / Магазин книг</b> tugmasini bosing.\n\n"
+                            "Hududiy guruhlar havolalarini olish uchun <b>🌐 Hududiy guruhlar / Региональные группы</b> tugmasini bosing."
                         )
                         send_message(chat_id, help_text, reply_markup=get_keyboard())
                 except Exception as e:
