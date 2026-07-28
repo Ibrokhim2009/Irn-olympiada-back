@@ -2607,6 +2607,67 @@ class BookOrderViewSet(viewsets.ModelViewSet):
             locked_book.save(update_fields=['stock'])
             serializer.save(user=self.request.user, total_price=locked_book.price * amount)
 
+    @action(detail=False, methods=['post'])
+    def checkout(self, request):
+        """Places one order per distinct book in the cart, all sharing the same
+        delivery address and receipt image (one upload, reused across rows)."""
+        from rest_framework.exceptions import ValidationError
+
+        items_raw = request.data.get('items')
+        delivery_address = (request.data.get('delivery_address') or '').strip()
+        receipt_image = request.FILES.get('receipt_image')
+
+        if not delivery_address:
+            return Response({'error': 'delivery_address is required'}, status=400)
+        if not receipt_image:
+            return Response({'error': 'receipt_image is required'}, status=400)
+
+        try:
+            items = json.loads(items_raw) if isinstance(items_raw, str) else items_raw
+        except (TypeError, ValueError):
+            items = None
+        if not items:
+            return Response({'error': 'items is required'}, status=400)
+
+        created_orders = []
+        with transaction.atomic():
+            shared_receipt_name = None
+            for idx, item in enumerate(items):
+                try:
+                    book_id = int(item['book'])
+                    amount = int(item.get('amount') or 1)
+                except (KeyError, TypeError, ValueError):
+                    raise ValidationError({'items': f'Invalid item at index {idx}'})
+
+                book = Book.objects.select_for_update().filter(id=book_id).first()
+                if not book:
+                    raise ValidationError({'items': f'Book {book_id} not found'})
+                if amount > book.remaining_stock():
+                    raise ValidationError({'items': f'Not enough stock for book {book_id}'})
+
+                book.stock -= amount
+                book.save(update_fields=['stock'])
+
+                order = BookOrder(
+                    user=request.user,
+                    book=book,
+                    amount=amount,
+                    total_price=book.price * amount,
+                    delivery_address=delivery_address,
+                    status=BookOrder.Status.PENDING,
+                )
+                if shared_receipt_name is None:
+                    order.receipt_image = receipt_image
+                    order.save()
+                    shared_receipt_name = order.receipt_image.name
+                else:
+                    order.receipt_image.name = shared_receipt_name
+                    order.save()
+                created_orders.append(order)
+
+        serializer = self.get_serializer(created_orders, many=True)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
     @action(detail=True, methods=['post'])
     def update_status(self, request, pk=None):
         order = self.get_object()
