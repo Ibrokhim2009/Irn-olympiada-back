@@ -334,6 +334,25 @@ class RegisterSerializer(serializers.ModelSerializer):
         return User.objects.create_user(**validated_data, role=User.Role.PARTICIPANT)
 
 
+class TeacherRegisterSerializer(serializers.ModelSerializer):
+    """Public self-registration for teachers — no school/grade/birth_date needed,
+    unlike student registration. User.save() fills in a placeholder `school` value
+    for the teacher role when left blank."""
+    password = serializers.CharField(write_only=True)
+    participant_id = serializers.CharField(read_only=True)
+    username = serializers.CharField(required=False, allow_blank=True)
+
+    class Meta:
+        model = User
+        fields = ('username', 'password', 'first_name', 'last_name', 'middle_name', 'phone', 'region', 'participant_id')
+
+    def create(self, validated_data):
+        if not validated_data.get('username'):
+            import uuid
+            validated_data['username'] = f"{validated_data.get('phone')}_{uuid.uuid4().hex[:8]}"
+        return User.objects.create_user(**validated_data, role=User.Role.TEACHER)
+
+
 class LoginRequestSerializer(serializers.Serializer):
     username = serializers.CharField()
     password = serializers.CharField()

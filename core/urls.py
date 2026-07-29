@@ -23,7 +23,8 @@ from .views import (
     TelegramUsersListView, TelegramBroadcastView, BookOrderViewSet,
     VisaApplicantViewSet, VisaDocumentViewSet, VisaNoteViewSet, VisaTaskViewSet, VisaAuditLogViewSet,
     TwoFactorVerifyView, TwoFactorSetupView, TwoFactorConfirmView, TwoFactorDisableView,
-    TeacherSearchView, TeacherAddStudentView, TeacherStudentsListView, TeacherCoinsView
+    TeacherSearchView, TeacherAddStudentView, TeacherStudentsListView, TeacherCoinsView,
+    TeacherRegisterView, TeacherResetStudentPasswordView, TeacherMyCoinsView
 )
 
 schema_view = get_schema_view(
@@ -61,6 +62,7 @@ router.register(r'visa/audit-logs', VisaAuditLogViewSet, basename='visa-audit-lo
 
 urlpatterns = [
     path('auth/register/', RegisterView.as_view(), name='register'),
+    path('auth/register-teacher/', TeacherRegisterView.as_view(), name='register_teacher'),
     path('auth/login/', LoginView.as_view(), name='login_custom'),
     path('auth/telegram-webapp/', TelegramWebAppAuthView.as_view(), name='telegram_webapp_auth'),
     path('auth/2fa/verify/', TwoFactorVerifyView.as_view(), name='2fa_verify'),
@@ -79,6 +81,8 @@ urlpatterns = [
     path('teachers/search/', TeacherSearchView.as_view(), name='teacher-search'),
     path('teacher/students/', TeacherStudentsListView.as_view(), name='teacher-students'),
     path('teacher/add-student/', TeacherAddStudentView.as_view(), name='teacher-add-student'),
+    path('teacher/students/<int:student_id>/reset-password/', TeacherResetStudentPasswordView.as_view(), name='teacher-reset-student-password'),
+    path('teacher/my-coins/', TeacherMyCoinsView.as_view(), name='teacher-my-coins'),
 
     path('telegram/users/', TelegramUsersListView.as_view(), name='telegram-users'),
     path('telegram/broadcast/', TelegramBroadcastView.as_view(), name='telegram-broadcast'),

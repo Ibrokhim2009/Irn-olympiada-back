@@ -24,7 +24,7 @@ from drf_yasg import openapi
 from rest_framework import response
 from payme import Payme
 from .serializers import (
-    RegisterSerializer, UserSerializer, UserListSerializer, LoginRequestSerializer,
+    RegisterSerializer, TeacherRegisterSerializer, UserSerializer, UserListSerializer, LoginRequestSerializer,
     OlympiadSerializer, SubOlympiadSerializer, SubOlympiadGradeSerializer,
     QuestionSerializer, QuestionExamSerializer, RegistrationSerializer,
     TestSerializer, NotificationSerializer, RegionSerializer, ExamResultSerializer,
@@ -227,6 +227,25 @@ class RegisterView(generics.CreateAPIView):
     queryset = User.objects.all()
     permission_classes = (permissions.AllowAny,)
     serializer_class = RegisterSerializer
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.save()
+        refresh = RefreshToken.for_user(user)
+        return Response({
+            'user': UserSerializer(user).data,
+            'access': str(refresh.access_token),
+            'refresh': str(refresh)
+        }, status=status.HTTP_201_CREATED)
+
+
+class TeacherRegisterView(generics.CreateAPIView):
+    """Public self-registration for teachers, mirroring RegisterView exactly
+    but creating a role=teacher account (TeacherRegisterSerializer)."""
+    queryset = User.objects.all()
+    permission_classes = (permissions.AllowAny,)
+    serializer_class = TeacherRegisterSerializer
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -648,6 +667,59 @@ class TeacherStudentsListView(generics.ListAPIView):
 
     def get_queryset(self):
         return User.objects.filter(teacher=self.request.user).prefetch_related('registrations__olympiad').order_by('-date_joined')
+
+
+class TeacherResetStudentPasswordView(APIView):
+    """Lets a teacher reset the password of one of their own linked students —
+    scoped by `teacher=request.user` so a teacher can't touch anyone else's
+    account. Auto-generates a new password (same UX as adding a student) rather
+    than trusting the teacher to type a strong one."""
+    permission_classes = (IsTeacher,)
+
+    def post(self, request, student_id):
+        import random
+        student = generics.get_object_or_404(User, id=student_id, teacher=request.user)
+        new_password = str(random.randint(100000, 999999))
+        student.set_password(new_password)
+        student.password_text = new_password
+        student.save(update_fields=['password', 'password_text'])
+        return Response({'generated_password': new_password})
+
+
+class TeacherMyCoinsView(APIView):
+    """A teacher's own coin total (no filters) — same score>=100/95/90 rule and
+    the same Registration.teacher join TeacherCoinsView uses, so this number
+    always matches what the admin leaderboard shows for this teacher."""
+    permission_classes = (IsTeacher,)
+
+    def get(self, request):
+        pairs = set(Registration.objects.filter(teacher=request.user).values_list('user_id', 'olympiad_id'))
+        if not pairs:
+            return Response({'gold': 0, 'silver': 0, 'bronze': 0, 'total_coins': 0, 'student_count': 0})
+
+        user_ids = {uid for uid, _ in pairs}
+        results = ExamResult.objects.filter(completed_at__isnull=False, score__gte=90, user_id__in=user_ids)
+
+        gold = silver = bronze = 0
+        students = set()
+        for res in results:
+            if (res.user_id, res.olympiad_id) not in pairs:
+                continue
+            if res.score >= 100:
+                gold += 1
+            elif res.score >= 95:
+                silver += 1
+            elif res.score >= 90:
+                bronze += 1
+            students.add(res.user_id)
+
+        return Response({
+            'gold': gold,
+            'silver': silver,
+            'bronze': bronze,
+            'total_coins': gold * 3 + silver * 2 + bronze * 1,
+            'student_count': len(students),
+        })
 
 
 class RegistrationViewSet(viewsets.ModelViewSet):
