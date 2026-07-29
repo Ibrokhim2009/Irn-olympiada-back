@@ -974,6 +974,12 @@ class RegisterForOlympiadView(APIView):
             registration.payment_status = initial_status
             registration.registered_at = timezone.now()
             registration.payment_deadline = None
+            # Refresh from the student's current teacher link too — it may have
+            # changed since the expired attempt, and coins should credit whoever
+            # is actually linked now, not a stale snapshot.
+            registration.teacher_name = target_user.teacher_name
+            registration.teacher_phone = target_user.teacher_phone
+            registration.teacher = target_user.teacher
             registration.save()
             created = True
 
