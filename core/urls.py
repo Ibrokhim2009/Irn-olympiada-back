@@ -24,7 +24,8 @@ from .views import (
     VisaApplicantViewSet, VisaDocumentViewSet, VisaNoteViewSet, VisaTaskViewSet, VisaAuditLogViewSet,
     TwoFactorVerifyView, TwoFactorSetupView, TwoFactorConfirmView, TwoFactorDisableView,
     TeacherSearchView, TeacherAddStudentView, TeacherStudentsListView, TeacherCoinsView,
-    TeacherRegisterView, TeacherResetStudentPasswordView, TeacherMyCoinsView
+    TeacherRegisterView, TeacherResetStudentPasswordView, TeacherMyCoinsView,
+    TeacherCoinAdjustmentViewSet
 )
 
 schema_view = get_schema_view(
@@ -59,6 +60,7 @@ router.register(r'visa/documents', VisaDocumentViewSet, basename='visa-documents
 router.register(r'visa/notes', VisaNoteViewSet, basename='visa-notes')
 router.register(r'visa/tasks', VisaTaskViewSet, basename='visa-tasks')
 router.register(r'visa/audit-logs', VisaAuditLogViewSet, basename='visa-audit-logs')
+router.register(r'teacher-coin-adjustments', TeacherCoinAdjustmentViewSet, basename='teacher-coin-adjustments')
 
 urlpatterns = [
     path('auth/register/', RegisterView.as_view(), name='register'),

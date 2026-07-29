@@ -24,7 +24,7 @@ from drf_yasg import openapi
 from rest_framework import response
 from payme import Payme
 from .serializers import (
-    RegisterSerializer, TeacherRegisterSerializer, UserSerializer, UserListSerializer, LoginRequestSerializer,
+    RegisterSerializer, TeacherRegisterSerializer, TeacherCoinAdjustmentSerializer, UserSerializer, UserListSerializer, LoginRequestSerializer,
     OlympiadSerializer, SubOlympiadSerializer, SubOlympiadGradeSerializer,
     QuestionSerializer, QuestionExamSerializer, RegistrationSerializer,
     TestSerializer, NotificationSerializer, RegionSerializer, ExamResultSerializer,
@@ -38,7 +38,8 @@ from .models import (
     Registration, ExamResult, Test, Question,
     Notification, Region, SupportTicket, TicketReply,
     SMSSentHistory, ClickTransactions, EditRequest, Book, BookOrder,
-    VisaApplicant, VisaDocument, VisaNote, VisaTask, VisaAuditLog
+    VisaApplicant, VisaDocument, VisaNote, VisaTask, VisaAuditLog,
+    TeacherCoinAdjustment
 )
 from .permissions import IsAdminUserOrReadOnly, IsAdminOrCoordinatorReadOnly, IsAdminOrCoordinator, IsTeacher
 from .utils_payme import get_payme_link
@@ -632,33 +633,24 @@ class UserViewSet(viewsets.ModelViewSet):
 class TeacherAddStudentView(generics.CreateAPIView):
     """A teacher creating a student account directly (as opposed to a student
     self-registering and picking a teacher from search). Reuses RegisterSerializer
-    as-is, just forces role=participant (already hardcoded there) and links the
-    new student to the requesting teacher, auto-generating a password since the
-    teacher isn't expected to invent one on the student's behalf."""
+    as-is (its `password` field is required), just forces role=participant
+    (already hardcoded there) and links the new student to the requesting
+    teacher. The teacher types the student's password themselves."""
     serializer_class = RegisterSerializer
     permission_classes = (IsTeacher,)
 
     def create(self, request, *args, **kwargs):
-        import random
-        generated_password = str(random.randint(100000, 999999))
-
-        data = request.data.copy()
-        data['password'] = generated_password
-
-        serializer = self.get_serializer(data=data)
+        serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
         teacher = request.user
         serializer.save(
-            password=generated_password,
             teacher=teacher,
             teacher_name=f"{teacher.last_name} {teacher.first_name}".strip(),
             teacher_phone=teacher.phone,
         )
 
-        response_data = dict(serializer.data)
-        response_data['generated_password'] = generated_password
-        return Response(response_data, status=status.HTTP_201_CREATED)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
 class TeacherStudentsListView(generics.ListAPIView):
@@ -693,31 +685,33 @@ class TeacherMyCoinsView(APIView):
     permission_classes = (IsTeacher,)
 
     def get(self, request):
+        from django.db.models import Sum
+        adjustment = TeacherCoinAdjustment.objects.filter(teacher=request.user).aggregate(total=Sum('amount'))['total'] or 0
+
         pairs = set(Registration.objects.filter(teacher=request.user).values_list('user_id', 'olympiad_id'))
-        if not pairs:
-            return Response({'gold': 0, 'silver': 0, 'bronze': 0, 'total_coins': 0, 'student_count': 0})
-
-        user_ids = {uid for uid, _ in pairs}
-        results = ExamResult.objects.filter(completed_at__isnull=False, score__gte=90, user_id__in=user_ids)
-
         gold = silver = bronze = 0
         students = set()
-        for res in results:
-            if (res.user_id, res.olympiad_id) not in pairs:
-                continue
-            if res.score >= 100:
-                gold += 1
-            elif res.score >= 95:
-                silver += 1
-            elif res.score >= 90:
-                bronze += 1
-            students.add(res.user_id)
+
+        if pairs:
+            user_ids = {uid for uid, _ in pairs}
+            results = ExamResult.objects.filter(completed_at__isnull=False, score__gte=90, user_id__in=user_ids)
+            for res in results:
+                if (res.user_id, res.olympiad_id) not in pairs:
+                    continue
+                if res.score >= 100:
+                    gold += 1
+                elif res.score >= 95:
+                    silver += 1
+                elif res.score >= 90:
+                    bronze += 1
+                students.add(res.user_id)
 
         return Response({
             'gold': gold,
             'silver': silver,
             'bronze': bronze,
-            'total_coins': gold * 3 + silver * 2 + bronze * 1,
+            'manual_adjustment': adjustment,
+            'total_coins': gold * 3 + silver * 2 + bronze * 1 + adjustment,
             'student_count': len(students),
         })
 
@@ -2074,10 +2068,22 @@ class TeacherCoinsView(APIView):
                 entry['bronze'] += 1
             entry['students'].add(res.user_id)
 
-        teachers = User.objects.filter(id__in=coins_by_teacher.keys()).select_related('region')
+        from django.db.models import Sum
+        adjustments_map = dict(
+            TeacherCoinAdjustment.objects.values('teacher_id').annotate(total=Sum('amount')).values_list('teacher_id', 'total')
+        )
+
+        # A teacher with only a manual adjustment (no medal results yet) should
+        # still show up on the leaderboard.
+        all_teacher_ids = set(coins_by_teacher.keys()) | set(adjustments_map.keys())
+        if eligible_teacher_ids is not None:
+            all_teacher_ids &= eligible_teacher_ids
+
+        teachers = User.objects.filter(id__in=all_teacher_ids).select_related('region')
         data = []
         for teacher in teachers:
-            entry = coins_by_teacher[teacher.id]
+            entry = coins_by_teacher.get(teacher.id, {'gold': 0, 'silver': 0, 'bronze': 0, 'students': set()})
+            adjustment = adjustments_map.get(teacher.id, 0)
             data.append({
                 'teacher_id': teacher.id,
                 'teacher_name': f"{teacher.last_name} {teacher.first_name}".strip() or teacher.username,
@@ -2086,11 +2092,25 @@ class TeacherCoinsView(APIView):
                 'gold': entry['gold'],
                 'silver': entry['silver'],
                 'bronze': entry['bronze'],
-                'total_coins': entry['gold'] * 3 + entry['silver'] * 2 + entry['bronze'] * 1,
+                'manual_adjustment': adjustment,
+                'total_coins': entry['gold'] * 3 + entry['silver'] * 2 + entry['bronze'] * 1 + adjustment,
                 'student_count': len(entry['students']),
             })
         data.sort(key=lambda d: -d['total_coins'])
         return Response(data)
+
+
+class TeacherCoinAdjustmentViewSet(viewsets.ModelViewSet):
+    """Manual coin credits/debits an admin applies on top of a teacher's
+    medal-based coins (TeacherCoinsView/TeacherMyCoinsView both add these in)."""
+    serializer_class = TeacherCoinAdjustmentSerializer
+    permission_classes = (IsAdminOrCoordinatorReadOnly,)
+    queryset = TeacherCoinAdjustment.objects.all().select_related('teacher', 'created_by')
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['teacher']
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
 
 
 class ExamResultViewSet(viewsets.ModelViewSet):

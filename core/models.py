@@ -347,6 +347,26 @@ class Registration(models.Model):
             return False
         return timezone.now() > self.payment_deadline
 
+
+class TeacherCoinAdjustment(models.Model):
+    """Manual coin credit/debit an admin applies to a teacher, on top of the
+    coins auto-computed from medal results (score>=100/95/90). Positive amount
+    adds coins, negative removes them — added together with the medal-based
+    total wherever a teacher's coins are shown."""
+    teacher = models.ForeignKey(User, on_delete=models.CASCADE, related_name='coin_adjustments', limit_choices_to={'role': 'teacher'})
+    amount = models.IntegerField(help_text="Positive to add coins, negative to remove")
+    note = models.CharField(max_length=255, null=True, blank=True)
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Ручная корректировка монет"
+        verbose_name_plural = "Ручные корректировки монет"
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.teacher} {'+' if self.amount >= 0 else ''}{self.amount}"
+
     @property
     def seconds_left(self):
         from django.utils import timezone

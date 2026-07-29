@@ -4,7 +4,8 @@ from .models import (
     Question, Test, Registration, ExamResult,
     Notification, Region, UserAchievement,
     SupportTicket, TicketReply, EditRequest, Book, BookOrder,
-    VisaApplicant, VisaDocument, VisaNote, VisaTask, VisaAuditLog
+    VisaApplicant, VisaDocument, VisaNote, VisaTask, VisaAuditLog,
+    TeacherCoinAdjustment
 )
 import base64
 import uuid
@@ -351,6 +352,20 @@ class TeacherRegisterSerializer(serializers.ModelSerializer):
             import uuid
             validated_data['username'] = f"{validated_data.get('phone')}_{uuid.uuid4().hex[:8]}"
         return User.objects.create_user(**validated_data, role=User.Role.TEACHER)
+
+
+class TeacherCoinAdjustmentSerializer(serializers.ModelSerializer):
+    created_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TeacherCoinAdjustment
+        fields = ('id', 'teacher', 'amount', 'note', 'created_by', 'created_by_name', 'created_at')
+        read_only_fields = ('created_by',)
+
+    def get_created_by_name(self, obj):
+        if not obj.created_by_id:
+            return None
+        return f"{obj.created_by.last_name} {obj.created_by.first_name}".strip()
 
 
 class LoginRequestSerializer(serializers.Serializer):
