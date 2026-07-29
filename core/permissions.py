@@ -17,6 +17,11 @@ class IsParticipant(permissions.BasePermission):
     def has_permission(self, request, view):
         return request.user.is_authenticated and request.user.role == 'participant'
 
+class IsTeacher(permissions.BasePermission):
+    """Только для учителей"""
+    def has_permission(self, request, view):
+        return request.user.is_authenticated and request.user.role == 'teacher'
+
 class IsAdminOrCoordinatorReadOnly(permissions.BasePermission):
     """Суперадмины и админы могут делать всё, координаторы могут только смотреть, остальные не могут ничего"""
     def has_permission(self, request, view):

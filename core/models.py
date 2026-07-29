@@ -53,6 +53,7 @@ class User(AbstractUser):
         ADMIN = 'admin', 'Администратор'
         COORDINATOR = 'coordinator', 'Координатор'
         PARTICIPANT = 'participant', 'Участник'
+        TEACHER = 'teacher', 'Учитель'
 
     role = models.CharField(max_length=20, choices=Role.choices, default=Role.PARTICIPANT)
     middle_name = models.CharField(max_length=150, null=True, blank=True)
@@ -73,7 +74,13 @@ class User(AbstractUser):
 
     teacher_name = models.CharField(max_length=255, null=True, blank=True)
     teacher_phone = models.CharField(max_length=20, null=True, blank=True)
-    
+
+    # Real linked teacher account (role=teacher), chosen via search at registration
+    # time or set by the teacher when they add the student directly — distinct from
+    # the free-text teacher_name/teacher_phone above, which remain as a fallback for
+    # students whose teacher has no account yet.
+    teacher = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True, limit_choices_to={'role': 'teacher'}, related_name='linked_students')
+
     teachers = models.JSONField(default=list, blank=True, help_text="List of teachers: [{'name': '...', 'phone': '...'}]")
     
     last_activity = models.DateTimeField(null=True, blank=True, db_index=True)
@@ -89,6 +96,10 @@ class User(AbstractUser):
             self.is_staff = True
             if not self.school:
                 self.school = "Staff"
+        elif self.role == self.Role.TEACHER and not self.school:
+            # Teachers aren't staff (no Django-admin/is_staff-gated access), just
+            # exempt from having to supply a "school" value like admins/coordinators.
+            self.school = "Staff"
             
         if not self.participant_id:
             import random
@@ -281,7 +292,10 @@ class Registration(models.Model):
 
     teacher_name = models.CharField(max_length=255, null=True, blank=True)
     teacher_phone = models.CharField(max_length=20, null=True, blank=True)
-    
+    # Copied from user.teacher at registration time, same as teacher_name/teacher_phone
+    # above — this is what the teacher-coins leaderboard aggregates against.
+    teacher = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, limit_choices_to={'role': 'teacher'}, related_name='taught_registrations')
+
     unique_participant_id = models.CharField(max_length=50, null=True, blank=True, unique=True, db_index=True, verbose_name="Уникальный ID участника для этой олимпиады")
 
     last_called_at = models.DateTimeField(null=True, blank=True, verbose_name="Последний звонок")

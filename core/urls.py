@@ -22,7 +22,8 @@ from .views import (
     TelegramWebhookView, EditRequestViewSet, BookViewSet,
     TelegramUsersListView, TelegramBroadcastView, BookOrderViewSet,
     VisaApplicantViewSet, VisaDocumentViewSet, VisaNoteViewSet, VisaTaskViewSet, VisaAuditLogViewSet,
-    TwoFactorVerifyView, TwoFactorSetupView, TwoFactorConfirmView, TwoFactorDisableView
+    TwoFactorVerifyView, TwoFactorSetupView, TwoFactorConfirmView, TwoFactorDisableView,
+    TeacherSearchView, TeacherAddStudentView, TeacherStudentsListView, TeacherCoinsView
 )
 
 schema_view = get_schema_view(
@@ -73,6 +74,11 @@ urlpatterns = [
     path('notifications/seed/', SeedNotificationsView.as_view(), name='notifications-seed'),
     path('notifications/send/', SendNotificationView.as_view(), name='notifications-send'),
     path('admin/stats/', AdminStatsView.as_view(), name='admin-stats'),
+    path('admin/teacher-coins/', TeacherCoinsView.as_view(), name='teacher-coins'),
+
+    path('teachers/search/', TeacherSearchView.as_view(), name='teacher-search'),
+    path('teacher/students/', TeacherStudentsListView.as_view(), name='teacher-students'),
+    path('teacher/add-student/', TeacherAddStudentView.as_view(), name='teacher-add-student'),
 
     path('telegram/users/', TelegramUsersListView.as_view(), name='telegram-users'),
     path('telegram/broadcast/', TelegramBroadcastView.as_view(), name='telegram-broadcast'),

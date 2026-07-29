@@ -33,14 +33,23 @@ class RegistrationSerializer(serializers.ModelSerializer):
     user_full_name = serializers.SerializerMethodField()
     user_phone = serializers.ReadOnlyField(source='user.phone')
     user_grade = serializers.ReadOnlyField(source='user.grade')
+    teacher_display_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Registration
         fields = ('id', 'olympiad', 'olympiad_title', 'olympiad_type', 'price',
                   'registered_at', 'payment_status', 'status_label', 'transaction_id',
-                  'teacher_name', 'teacher_phone', 'expires_at', 'seconds_left',
+                  'teacher_name', 'teacher_phone', 'teacher', 'teacher_display_name', 'expires_at', 'seconds_left',
                   'unique_participant_id', 'user_full_name', 'user_phone', 'user_grade',
                   'last_called_at')
+
+    def get_teacher_display_name(self, obj):
+        if not obj.teacher_id:
+            return None
+        try:
+            return f"{obj.teacher.last_name} {obj.teacher.first_name}".strip() or obj.teacher.username
+        except Exception:
+            return None
 
     def get_user_full_name(self, obj):
         try:
@@ -240,7 +249,7 @@ class UserSerializer(serializers.ModelSerializer):
         fields = ('id', 'username', 'email', 'first_name', 'last_name', 'middle_name',
                   'phone', 'birth_date', 'region', 'school', 'grade', 'grade_confirmed_year',
                   'needs_grade_confirmation', 'role', 'participant_id',
-                  'teacher_name', 'teacher_phone', 'teachers', 'password_text', 'telegram_chat_id', 'password',
+                  'teacher_name', 'teacher_phone', 'teacher', 'teachers', 'password_text', 'telegram_chat_id', 'password',
                   'totp_enabled', 'registrations', 'exam_results', 'notifications', 'achievements')
         read_only_fields = ('totp_enabled',)
 
@@ -277,7 +286,7 @@ class UserListSerializer(serializers.ModelSerializer):
         model = User
         fields = ('id', 'username', 'email', 'first_name', 'last_name', 'middle_name',
                   'phone', 'birth_date', 'region', 'school', 'grade', 'role', 'participant_id',
-                  'teacher_name', 'teacher_phone', 'teachers', 'password_text', 'telegram_chat_id',
+                  'teacher_name', 'teacher_phone', 'teacher', 'teachers', 'password_text', 'telegram_chat_id',
                   'registrations')
 
     
@@ -286,12 +295,15 @@ class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)
     participant_id = serializers.CharField(read_only=True)
     username = serializers.CharField(required=False, allow_blank=True)
+    # Real linked teacher account, chosen via the teacher-search autocomplete on the
+    # registration page — restricted to actual teacher accounts, not just any user.
+    teacher = serializers.PrimaryKeyRelatedField(queryset=User.objects.filter(role=User.Role.TEACHER), required=False, allow_null=True)
 
     class Meta:
         model = User
         fields = ('username', 'password', 'first_name', 'last_name', 'middle_name',
                   'phone', 'birth_date', 'region', 'school', 'grade', 'participant_id',
-                  'teacher_name', 'teacher_phone', 'teachers')
+                  'teacher_name', 'teacher_phone', 'teacher', 'teachers')
 
     def create(self, validated_data):
         if not validated_data.get('username'):

@@ -40,7 +40,7 @@ from .models import (
     SMSSentHistory, ClickTransactions, EditRequest, Book, BookOrder,
     VisaApplicant, VisaDocument, VisaNote, VisaTask, VisaAuditLog
 )
-from .permissions import IsAdminUserOrReadOnly, IsAdminOrCoordinatorReadOnly, IsAdminOrCoordinator
+from .permissions import IsAdminUserOrReadOnly, IsAdminOrCoordinatorReadOnly, IsAdminOrCoordinator, IsTeacher
 from .utils_payme import get_payme_link
 from .utils_click import get_click_link
 from asgiref.sync import async_to_sync
@@ -238,6 +238,32 @@ class RegisterView(generics.CreateAPIView):
             'access': str(refresh.access_token),
             'refresh': str(refresh)
         }, status=status.HTTP_201_CREATED)
+
+
+class TeacherSearchView(APIView):
+    """Public lookup used by the registration page's teacher search-select —
+    lets a not-yet-registered student find and link a real teacher account
+    instead of just typing free-text teacher name/phone."""
+    permission_classes = (permissions.AllowAny,)
+
+    def get(self, request):
+        search = (request.query_params.get('search') or '').strip()
+        qs = User.objects.filter(role=User.Role.TEACHER).select_related('region')
+        if search:
+            qs = qs.filter(
+                models.Q(first_name__icontains=search) |
+                models.Q(last_name__icontains=search) |
+                models.Q(phone__icontains=search)
+            )
+        results = []
+        for u in qs[:10]:
+            results.append({
+                'id': u.id,
+                'full_name': f"{u.last_name} {u.first_name}".strip() or u.username,
+                'phone': u.phone,
+                'region_name': getattr(u.region, 'name_ru', None) if u.region else None,
+            })
+        return Response(results)
 
 
 class LoginView(APIView):
@@ -583,6 +609,46 @@ class UserViewSet(viewsets.ModelViewSet):
         return Response({'success': True, 'message': f'Пароль для {user.username} успешно обновлен'})
 
 
+class TeacherAddStudentView(generics.CreateAPIView):
+    """A teacher creating a student account directly (as opposed to a student
+    self-registering and picking a teacher from search). Reuses RegisterSerializer
+    as-is, just forces role=participant (already hardcoded there) and links the
+    new student to the requesting teacher, auto-generating a password since the
+    teacher isn't expected to invent one on the student's behalf."""
+    serializer_class = RegisterSerializer
+    permission_classes = (IsTeacher,)
+
+    def create(self, request, *args, **kwargs):
+        import random
+        generated_password = str(random.randint(100000, 999999))
+
+        data = request.data.copy()
+        data['password'] = generated_password
+
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+
+        teacher = request.user
+        serializer.save(
+            password=generated_password,
+            teacher=teacher,
+            teacher_name=f"{teacher.last_name} {teacher.first_name}".strip(),
+            teacher_phone=teacher.phone,
+        )
+
+        response_data = dict(serializer.data)
+        response_data['generated_password'] = generated_password
+        return Response(response_data, status=status.HTTP_201_CREATED)
+
+
+class TeacherStudentsListView(generics.ListAPIView):
+    serializer_class = UserListSerializer
+    permission_classes = (IsTeacher,)
+
+    def get_queryset(self):
+        return User.objects.filter(teacher=self.request.user).prefetch_related('registrations__olympiad').order_by('-date_joined')
+
+
 class RegistrationViewSet(viewsets.ModelViewSet):
     serializer_class = RegistrationSerializer
     permission_classes = (permissions.IsAuthenticated,)
@@ -821,6 +887,9 @@ class RegisterForOlympiadView(APIView):
         target_user = request.user
         if request.user.role in ['admin', 'superadmin'] and request.data.get('user_id'):
             target_user = generics.get_object_or_404(User, id=request.data.get('user_id'))
+        elif request.user.role == 'teacher' and request.data.get('user_id'):
+            # Teachers may only register their own linked students, not any user.
+            target_user = generics.get_object_or_404(User, id=request.data.get('user_id'), teacher=request.user)
 
         registration, created = Registration.objects.get_or_create(
             user=target_user,
@@ -830,6 +899,7 @@ class RegisterForOlympiadView(APIView):
                 'price': olympiad.price,
                 'teacher_name': target_user.teacher_name,
                 'teacher_phone': target_user.teacher_phone,
+                'teacher': target_user.teacher,
             }
         )
 
@@ -1841,6 +1911,112 @@ class AllResultsListView(APIView):
                 'avg_score': avg_score,
                 'results': data
             })
+        return Response(data)
+
+
+class TeacherCoinsView(APIView):
+    """Admin-facing leaderboard: how many coins each teacher has earned from
+    their linked students' medal results (score>=100 gold=3, >=95 silver=2,
+    >=90 bronze=1 — same thresholds ResultsManager.jsx already displays)."""
+    permission_classes = (permissions.IsAuthenticated,)
+
+    def get(self, request):
+        if request.user.role not in [User.Role.ADMIN, User.Role.COORDINATOR] and not request.user.is_superuser:
+            return Response({'error': 'Forbidden'}, status=403)
+
+        lang = request.query_params.get('lang', 'uz')
+
+        queryset = ExamResult.objects.filter(
+            completed_at__isnull=False, score__gte=90
+        ).select_related('user', 'olympiad', 'sub_olympiad_grade__sub_olympiad')
+
+        olympiads = request.query_params.getlist('olympiad') or request.query_params.getlist('olympiad[]')
+        if not olympiads and 'olympiad' in request.query_params:
+            olympiads = request.query_params.get('olympiad').split(',')
+        if olympiads:
+            olympiads = [o.strip() for o in olympiads if o.strip()]
+            if olympiads:
+                queryset = queryset.filter(olympiad__id__in=olympiads)
+
+        subjects = request.query_params.getlist('subject') or request.query_params.getlist('subject[]')
+        if not subjects and 'subject' in request.query_params:
+            subjects = request.query_params.get('subject').split(',')
+        if subjects:
+            subjects = [s.strip() for s in subjects if s.strip()]
+            if subjects:
+                queryset = queryset.filter(
+                    models.Q(sub_olympiad_grade__sub_olympiad__title_ru__in=subjects) |
+                    models.Q(sub_olympiad_grade__sub_olympiad__title_uz__in=subjects) |
+                    models.Q(sub_olympiad_grade__sub_olympiad__title_en__in=subjects)
+                )
+
+        grades = request.query_params.getlist('grade') or request.query_params.getlist('grade[]')
+        if not grades and 'grade' in request.query_params:
+            grades = request.query_params.get('grade').split(',')
+        if grades:
+            grades = [g.strip() for g in grades if g.strip()]
+            if grades:
+                queryset = queryset.filter(sub_olympiad_grade__grade__in=grades)
+
+        # Region filters by the TEACHER's own region (this is a teacher leaderboard),
+        # not the student's — narrow down which teacher ids are eligible up front.
+        eligible_teacher_ids = None
+        regions = request.query_params.getlist('region') or request.query_params.getlist('region[]')
+        if not regions and 'region' in request.query_params:
+            regions = request.query_params.get('region').split(',')
+        if regions:
+            regions = [r.strip() for r in regions if r.strip()]
+            if regions:
+                eligible_teacher_ids = set(User.objects.filter(
+                    models.Q(role=User.Role.TEACHER) & (
+                        models.Q(region__name_ru__in=regions) |
+                        models.Q(region__name_uz__in=regions) |
+                        models.Q(region__name_en__in=regions) |
+                        models.Q(region__id__in=[r for r in regions if r.isdigit()])
+                    )
+                ).values_list('id', flat=True))
+
+        # (user_id, olympiad_id) -> teacher_id, from Registrations that have a
+        # linked teacher — mirrors how teacher_name/teacher_phone are copied onto
+        # Registration at registration time (RegisterForOlympiadView).
+        reg_teacher_map = {
+            (uid, oid): tid
+            for uid, oid, tid in Registration.objects.filter(teacher__isnull=False).values_list('user_id', 'olympiad_id', 'teacher_id')
+        }
+
+        coins_by_teacher = {}
+        for res in queryset:
+            teacher_id = reg_teacher_map.get((res.user_id, res.olympiad_id))
+            if not teacher_id:
+                continue
+            if eligible_teacher_ids is not None and teacher_id not in eligible_teacher_ids:
+                continue
+
+            entry = coins_by_teacher.setdefault(teacher_id, {'gold': 0, 'silver': 0, 'bronze': 0, 'students': set()})
+            if res.score >= 100:
+                entry['gold'] += 1
+            elif res.score >= 95:
+                entry['silver'] += 1
+            elif res.score >= 90:
+                entry['bronze'] += 1
+            entry['students'].add(res.user_id)
+
+        teachers = User.objects.filter(id__in=coins_by_teacher.keys()).select_related('region')
+        data = []
+        for teacher in teachers:
+            entry = coins_by_teacher[teacher.id]
+            data.append({
+                'teacher_id': teacher.id,
+                'teacher_name': f"{teacher.last_name} {teacher.first_name}".strip() or teacher.username,
+                'teacher_phone': teacher.phone,
+                'region_name': getattr(teacher.region, f'name_{lang}', None) if teacher.region else None,
+                'gold': entry['gold'],
+                'silver': entry['silver'],
+                'bronze': entry['bronze'],
+                'total_coins': entry['gold'] * 3 + entry['silver'] * 2 + entry['bronze'] * 1,
+                'student_count': len(entry['students']),
+            })
+        data.sort(key=lambda d: -d['total_coins'])
         return Response(data)
 
 
