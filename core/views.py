@@ -477,6 +477,7 @@ class UserViewSet(viewsets.ModelViewSet):
             queryset = User.objects.all()
         else:
             queryset = User.objects.filter(role=User.Role.PARTICIPANT)
+        queryset = queryset.select_related('teacher')
         if self.action in ['retrieve', 'update', 'partial_update']:
             queryset = queryset.prefetch_related(
                 'registrations__olympiad',

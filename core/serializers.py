@@ -242,14 +242,19 @@ class UserSerializer(serializers.ModelSerializer):
     achievements = UserAchievementSerializer(many=True, read_only=True)
     password = serializers.CharField(write_only=True, required=False)
     school = serializers.CharField(required=False, allow_blank=True, default='')
+    # User.save() always overwrites username from the auto-generated participant_id
+    # anyway (models.py), so requiring it here is pointless — admin-created accounts
+    # (e.g. teachers via UserViewSet) don't need to invent one.
+    username = serializers.CharField(required=False, allow_blank=True)
     needs_grade_confirmation = serializers.SerializerMethodField()
+    teacher_info = serializers.SerializerMethodField()
 
     class Meta:
         model = User
         fields = ('id', 'username', 'email', 'first_name', 'last_name', 'middle_name',
                   'phone', 'birth_date', 'region', 'school', 'grade', 'grade_confirmed_year',
                   'needs_grade_confirmation', 'role', 'participant_id',
-                  'teacher_name', 'teacher_phone', 'teacher', 'teachers', 'password_text', 'telegram_chat_id', 'password',
+                  'teacher_name', 'teacher_phone', 'teacher', 'teacher_info', 'teachers', 'password_text', 'telegram_chat_id', 'password',
                   'totp_enabled', 'registrations', 'exam_results', 'notifications', 'achievements')
         read_only_fields = ('totp_enabled',)
 
@@ -259,6 +264,13 @@ class UserSerializer(serializers.ModelSerializer):
         if obj.role != User.Role.PARTICIPANT or not obj.grade or obj.grade == '11+':
             return False
         return obj.grade_confirmed_year != current_academic_year()
+
+    def get_teacher_info(self, obj):
+        # The FK `teacher` field only serializes the id — this gives the admin UI
+        # a name/phone to actually display for the student's linked teacher account.
+        if not obj.teacher_id:
+            return None
+        return {'id': obj.teacher_id, 'full_name': f"{obj.teacher.last_name} {obj.teacher.first_name}".strip(), 'phone': obj.teacher.phone}
 
     def create(self, validated_data):
         password = validated_data.pop('password', None)
@@ -281,13 +293,19 @@ class UserSerializer(serializers.ModelSerializer):
 
 class UserListSerializer(serializers.ModelSerializer):
     registrations = RegistrationSerializer(many=True, read_only=True)
+    teacher_info = serializers.SerializerMethodField()
 
     class Meta:
         model = User
         fields = ('id', 'username', 'email', 'first_name', 'last_name', 'middle_name',
                   'phone', 'birth_date', 'region', 'school', 'grade', 'role', 'participant_id',
-                  'teacher_name', 'teacher_phone', 'teacher', 'teachers', 'password_text', 'telegram_chat_id',
+                  'teacher_name', 'teacher_phone', 'teacher', 'teacher_info', 'teachers', 'password_text', 'telegram_chat_id',
                   'registrations')
+
+    def get_teacher_info(self, obj):
+        if not obj.teacher_id:
+            return None
+        return {'id': obj.teacher_id, 'full_name': f"{obj.teacher.last_name} {obj.teacher.first_name}".strip(), 'phone': obj.teacher.phone}
 
     
 
