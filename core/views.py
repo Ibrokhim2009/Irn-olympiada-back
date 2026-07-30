@@ -664,18 +664,18 @@ class TeacherStudentsListView(generics.ListAPIView):
 class TeacherResetStudentPasswordView(APIView):
     """Lets a teacher reset the password of one of their own linked students —
     scoped by `teacher=request.user` so a teacher can't touch anyone else's
-    account. Auto-generates a new password (same UX as adding a student) rather
-    than trusting the teacher to type a strong one."""
+    account. The teacher types the new password themselves (same as Add Student)."""
     permission_classes = (IsTeacher,)
 
     def post(self, request, student_id):
-        import random
         student = generics.get_object_or_404(User, id=student_id, teacher=request.user)
-        new_password = str(random.randint(100000, 999999))
+        new_password = request.data.get('password', '')
+        if len(new_password) < 6:
+            return Response({'error': 'Password must be at least 6 characters'}, status=status.HTTP_400_BAD_REQUEST)
         student.set_password(new_password)
         student.password_text = new_password
         student.save(update_fields=['password', 'password_text'])
-        return Response({'generated_password': new_password})
+        return Response({'success': True})
 
 
 class TeacherMyCoinsView(APIView):
