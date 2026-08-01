@@ -24,7 +24,7 @@ from drf_yasg import openapi
 from rest_framework import response
 from payme import Payme
 from .serializers import (
-    RegisterSerializer, TeacherRegisterSerializer, TeacherCoinAdjustmentSerializer, UserSerializer, UserListSerializer, LoginRequestSerializer,
+    RegisterSerializer, TeacherRegisterSerializer, TeacherCoinAdjustmentSerializer, TeacherLinkRequestSerializer, UserSerializer, UserListSerializer, LoginRequestSerializer,
     OlympiadSerializer, SubOlympiadSerializer, SubOlympiadGradeSerializer,
     QuestionSerializer, QuestionExamSerializer, RegistrationSerializer,
     TestSerializer, NotificationSerializer, RegionSerializer, ExamResultSerializer,
@@ -39,9 +39,9 @@ from .models import (
     Notification, Region, SupportTicket, TicketReply,
     SMSSentHistory, ClickTransactions, EditRequest, Book, BookOrder,
     VisaApplicant, VisaDocument, VisaNote, VisaTask, VisaAuditLog,
-    TeacherCoinAdjustment
+    TeacherCoinAdjustment, TeacherLinkRequest
 )
-from .permissions import IsAdminUserOrReadOnly, IsAdminOrCoordinatorReadOnly, IsAdminOrCoordinator, IsTeacher
+from .permissions import IsAdminUserOrReadOnly, IsAdminOrCoordinatorReadOnly, IsAdminOrCoordinator, IsTeacher, IsApprovedTeacher
 from .utils_payme import get_payme_link
 from .utils_click import get_click_link
 from asgiref.sync import async_to_sync
@@ -268,7 +268,7 @@ class TeacherSearchView(APIView):
 
     def get(self, request):
         search = (request.query_params.get('search') or '').strip()
-        qs = User.objects.filter(role=User.Role.TEACHER).select_related('region')
+        qs = User.objects.filter(role=User.Role.TEACHER, teacher_approved=True).select_related('region')
         if search:
             qs = qs.filter(
                 models.Q(first_name__icontains=search) |
@@ -637,7 +637,7 @@ class TeacherAddStudentView(generics.CreateAPIView):
     (already hardcoded there) and links the new student to the requesting
     teacher. The teacher types the student's password themselves."""
     serializer_class = RegisterSerializer
-    permission_classes = (IsTeacher,)
+    permission_classes = (IsApprovedTeacher,)
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -655,7 +655,7 @@ class TeacherAddStudentView(generics.CreateAPIView):
 
 class TeacherStudentsListView(generics.ListAPIView):
     serializer_class = UserListSerializer
-    permission_classes = (IsTeacher,)
+    permission_classes = (IsApprovedTeacher,)
 
     def get_queryset(self):
         return User.objects.filter(teacher=self.request.user).prefetch_related('registrations__olympiad').order_by('-date_joined')
@@ -665,7 +665,7 @@ class TeacherResetStudentPasswordView(APIView):
     """Lets a teacher reset the password of one of their own linked students —
     scoped by `teacher=request.user` so a teacher can't touch anyone else's
     account. The teacher types the new password themselves (same as Add Student)."""
-    permission_classes = (IsTeacher,)
+    permission_classes = (IsApprovedTeacher,)
 
     def post(self, request, student_id):
         student = generics.get_object_or_404(User, id=student_id, teacher=request.user)
@@ -714,6 +714,139 @@ class TeacherMyCoinsView(APIView):
             'total_coins': gold * 3 + silver * 2 + bronze * 1 + adjustment,
             'student_count': len(students),
         })
+
+
+class TeacherStudentSearchView(APIView):
+    """Lets an approved teacher search EXISTING student accounts (by name/phone)
+    to invite them — distinct from TeacherAddStudentView, which creates a brand
+    new account. Inviting doesn't link anyone immediately; it just lets the
+    teacher pick a target for TeacherLinkRequestViewSet's create-from-teacher."""
+    permission_classes = (IsApprovedTeacher,)
+
+    def get(self, request):
+        search = (request.query_params.get('search') or '').strip()
+        if len(search) < 2:
+            return Response([])
+        qs = User.objects.filter(role=User.Role.PARTICIPANT).filter(
+            models.Q(first_name__icontains=search) |
+            models.Q(last_name__icontains=search) |
+            models.Q(phone__icontains=search)
+        ).select_related('region')[:10]
+        results = []
+        for u in qs:
+            results.append({
+                'id': u.id,
+                'full_name': f"{u.last_name} {u.first_name}".strip() or u.username,
+                'phone': u.phone,
+                'grade': u.grade,
+                'region_name': getattr(u.region, 'name_ru', None) if u.region else None,
+                'already_linked': u.teacher_id == request.user.id,
+            })
+        return Response(results)
+
+
+class TeacherLinkRequestViewSet(viewsets.ModelViewSet):
+    """Two-way confirmation before a student's User.teacher gets set:
+    - A student requests a teacher (create-from-student, initiated_by=student) —
+      the teacher must accept it.
+    - A teacher invites an existing student (create-from-teacher, initiated_by=teacher) —
+      the student must accept it.
+    Either way, `accept()` is the only place `student.teacher` actually gets written."""
+    serializer_class = TeacherLinkRequestSerializer
+    permission_classes = (permissions.IsAuthenticated,)
+    http_method_names = ['get', 'post']
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.role == User.Role.TEACHER:
+            return TeacherLinkRequest.objects.filter(teacher=user).select_related('teacher', 'student')
+        return TeacherLinkRequest.objects.filter(student=user).select_related('teacher', 'student')
+
+    @action(detail=False, methods=['get'])
+    def incoming(self, request):
+        """Pending requests directed AT the current user — i.e. the ones only
+        THEY can accept/reject (they're the recipient, not the initiator)."""
+        user = request.user
+        if user.role == User.Role.TEACHER:
+            qs = TeacherLinkRequest.objects.filter(teacher=user, status=TeacherLinkRequest.Status.PENDING, initiated_by=TeacherLinkRequest.InitiatedBy.STUDENT)
+        elif user.role == User.Role.PARTICIPANT:
+            qs = TeacherLinkRequest.objects.filter(student=user, status=TeacherLinkRequest.Status.PENDING, initiated_by=TeacherLinkRequest.InitiatedBy.TEACHER)
+        else:
+            qs = TeacherLinkRequest.objects.none()
+        serializer = self.get_serializer(qs.select_related('teacher', 'student'), many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'])
+    def sent(self, request):
+        """Pending requests the current user initiated themselves, so the UI can
+        show a 'waiting for confirmation' state instead of re-offering the same
+        search result."""
+        user = request.user
+        if user.role == User.Role.TEACHER:
+            qs = TeacherLinkRequest.objects.filter(teacher=user, status=TeacherLinkRequest.Status.PENDING, initiated_by=TeacherLinkRequest.InitiatedBy.TEACHER)
+        else:
+            qs = TeacherLinkRequest.objects.filter(student=user, status=TeacherLinkRequest.Status.PENDING, initiated_by=TeacherLinkRequest.InitiatedBy.STUDENT)
+        serializer = self.get_serializer(qs.select_related('teacher', 'student'), many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['post'], url_path='request-teacher', permission_classes=[permissions.IsAuthenticated])
+    def request_teacher(self, request):
+        """A logged-in student requests an already-approved teacher (used from the
+        profile page — the registration-page flow instead goes through
+        RegisterSerializer.create() since that account doesn't exist yet)."""
+        if request.user.role != User.Role.PARTICIPANT:
+            return Response({'error': 'Only students can request a teacher.'}, status=status.HTTP_403_FORBIDDEN)
+        teacher_id = request.data.get('teacher')
+        teacher = generics.get_object_or_404(User, id=teacher_id, role=User.Role.TEACHER, teacher_approved=True)
+        if TeacherLinkRequest.objects.filter(teacher=teacher, student=request.user, status=TeacherLinkRequest.Status.PENDING).exists():
+            return Response({'error': 'A request to this teacher is already pending.'}, status=status.HTTP_400_BAD_REQUEST)
+        link = TeacherLinkRequest.objects.create(teacher=teacher, student=request.user, initiated_by=TeacherLinkRequest.InitiatedBy.STUDENT)
+        return Response(self.get_serializer(link).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['post'], url_path='invite-student', permission_classes=[IsApprovedTeacher])
+    def invite_student(self, request):
+        """An approved teacher invites an existing student found via TeacherStudentSearchView."""
+        student_id = request.data.get('student')
+        student = generics.get_object_or_404(User, id=student_id, role=User.Role.PARTICIPANT)
+        if TeacherLinkRequest.objects.filter(teacher=request.user, student=student, status=TeacherLinkRequest.Status.PENDING).exists():
+            return Response({'error': 'An invite to this student is already pending.'}, status=status.HTTP_400_BAD_REQUEST)
+        link = TeacherLinkRequest.objects.create(teacher=request.user, student=student, initiated_by=TeacherLinkRequest.InitiatedBy.TEACHER)
+        return Response(self.get_serializer(link).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['post'])
+    def accept(self, request, pk=None):
+        link = self.get_object()
+        if link.status != TeacherLinkRequest.Status.PENDING:
+            return Response({'error': 'This request has already been resolved.'}, status=status.HTTP_400_BAD_REQUEST)
+        # Only the RECIPIENT (not whoever initiated it) may accept.
+        recipient_ok = (
+            (link.initiated_by == TeacherLinkRequest.InitiatedBy.STUDENT and request.user.id == link.teacher_id) or
+            (link.initiated_by == TeacherLinkRequest.InitiatedBy.TEACHER and request.user.id == link.student_id)
+        )
+        if not recipient_ok:
+            return Response({'error': 'Only the recipient can accept this request.'}, status=status.HTTP_403_FORBIDDEN)
+        link.status = TeacherLinkRequest.Status.ACCEPTED
+        link.responded_at = timezone.now()
+        link.save(update_fields=['status', 'responded_at'])
+        link.student.teacher = link.teacher
+        link.student.save(update_fields=['teacher'])
+        return Response(self.get_serializer(link).data)
+
+    @action(detail=True, methods=['post'])
+    def reject(self, request, pk=None):
+        link = self.get_object()
+        if link.status != TeacherLinkRequest.Status.PENDING:
+            return Response({'error': 'This request has already been resolved.'}, status=status.HTTP_400_BAD_REQUEST)
+        recipient_ok = (
+            (link.initiated_by == TeacherLinkRequest.InitiatedBy.STUDENT and request.user.id == link.teacher_id) or
+            (link.initiated_by == TeacherLinkRequest.InitiatedBy.TEACHER and request.user.id == link.student_id)
+        )
+        if not recipient_ok:
+            return Response({'error': 'Only the recipient can reject this request.'}, status=status.HTTP_403_FORBIDDEN)
+        link.status = TeacherLinkRequest.Status.REJECTED
+        link.responded_at = timezone.now()
+        link.save(update_fields=['status', 'responded_at'])
+        return Response(self.get_serializer(link).data)
 
 
 class RegistrationViewSet(viewsets.ModelViewSet):

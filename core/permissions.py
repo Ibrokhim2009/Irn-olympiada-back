@@ -22,6 +22,13 @@ class IsTeacher(permissions.BasePermission):
     def has_permission(self, request, view):
         return request.user.is_authenticated and request.user.role == 'teacher'
 
+class IsApprovedTeacher(IsTeacher):
+    """Учитель, чья заявка уже подтверждена админом — используется там, где
+    непроверенный (self-registered) учитель ещё не должен иметь возможности
+    добавлять/искать/приглашать учеников."""
+    def has_permission(self, request, view):
+        return super().has_permission(request, view) and bool(request.user.teacher_approved)
+
 class IsAdminOrCoordinatorReadOnly(permissions.BasePermission):
     """Суперадмины и админы могут делать всё, координаторы могут только смотреть, остальные не могут ничего"""
     def has_permission(self, request, view):

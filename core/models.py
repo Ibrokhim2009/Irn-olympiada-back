@@ -81,6 +81,13 @@ class User(AbstractUser):
     # students whose teacher has no account yet.
     teacher = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True, limit_choices_to={'role': 'teacher'}, related_name='linked_students')
 
+    # Only meaningful for role=teacher. Admin-created teachers default to already
+    # approved (an admin vouching for them directly); self-registered teachers
+    # (TeacherRegisterSerializer) explicitly start unapproved and must be reviewed
+    # by an admin before the account can act as a teacher (add/search/invite
+    # students) — see IsApprovedTeacher in permissions.py.
+    teacher_approved = models.BooleanField(default=True)
+
     teachers = models.JSONField(default=list, blank=True, help_text="List of teachers: [{'name': '...', 'phone': '...'}]")
     
     last_activity = models.DateTimeField(null=True, blank=True, db_index=True)
@@ -377,6 +384,39 @@ class TeacherCoinAdjustment(models.Model):
 
     def __str__(self):
         return f"{self.user.username} - {self.olympiad.title_ru}"
+
+
+class TeacherLinkRequest(models.Model):
+    """A pending confirmation step before a student's `User.teacher` FK is set —
+    either the student found the teacher via search and requested them, or the
+    teacher found the student via search and invited them. Either way, the OTHER
+    side must accept before the link becomes real (see accept()/reject() on the
+    viewset). Direct account creation (a teacher adding a brand-new student via
+    TeacherAddStudentView, or an admin linking a student manually) bypasses this —
+    it only applies to linking two already-existing accounts."""
+    class Status(models.TextChoices):
+        PENDING = 'pending', 'Kutilmoqda'
+        ACCEPTED = 'accepted', 'Qabul qilindi'
+        REJECTED = 'rejected', 'Rad etildi'
+
+    class InitiatedBy(models.TextChoices):
+        STUDENT = 'student', "O'quvchi"
+        TEACHER = 'teacher', "O'qituvchi"
+
+    teacher = models.ForeignKey(User, on_delete=models.CASCADE, related_name='link_requests_as_teacher', limit_choices_to={'role': 'teacher'})
+    student = models.ForeignKey(User, on_delete=models.CASCADE, related_name='link_requests_as_student', limit_choices_to={'role': 'participant'})
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.PENDING, db_index=True)
+    initiated_by = models.CharField(max_length=10, choices=InitiatedBy.choices)
+    created_at = models.DateTimeField(auto_now_add=True)
+    responded_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Запрос на привязку к учителю"
+        verbose_name_plural = "Запросы на привязку к учителю"
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.student} -> {self.teacher} ({self.status})"
 
 class ExamResult(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='exam_results')

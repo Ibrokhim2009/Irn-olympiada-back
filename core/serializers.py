@@ -5,7 +5,7 @@ from .models import (
     Notification, Region, UserAchievement,
     SupportTicket, TicketReply, EditRequest, Book, BookOrder,
     VisaApplicant, VisaDocument, VisaNote, VisaTask, VisaAuditLog,
-    TeacherCoinAdjustment
+    TeacherCoinAdjustment, TeacherLinkRequest
 )
 import base64
 import uuid
@@ -255,7 +255,7 @@ class UserSerializer(serializers.ModelSerializer):
         fields = ('id', 'username', 'email', 'first_name', 'last_name', 'middle_name',
                   'phone', 'birth_date', 'region', 'school', 'grade', 'grade_confirmed_year',
                   'needs_grade_confirmation', 'role', 'participant_id',
-                  'teacher_name', 'teacher_phone', 'teacher', 'teacher_info', 'teachers', 'password_text', 'telegram_chat_id', 'password',
+                  'teacher_name', 'teacher_phone', 'teacher', 'teacher_info', 'teacher_approved', 'teachers', 'password_text', 'telegram_chat_id', 'password',
                   'totp_enabled', 'registrations', 'exam_results', 'notifications', 'achievements')
         read_only_fields = ('totp_enabled',)
 
@@ -300,7 +300,7 @@ class UserListSerializer(serializers.ModelSerializer):
         model = User
         fields = ('id', 'username', 'email', 'first_name', 'last_name', 'middle_name',
                   'phone', 'birth_date', 'region', 'school', 'grade', 'role', 'participant_id',
-                  'teacher_name', 'teacher_phone', 'teacher', 'teacher_info', 'teachers', 'password_text', 'telegram_chat_id',
+                  'teacher_name', 'teacher_phone', 'teacher', 'teacher_info', 'teacher_approved', 'teachers', 'password_text', 'telegram_chat_id',
                   'registrations')
 
     def get_teacher_info(self, obj):
@@ -315,8 +315,10 @@ class RegisterSerializer(serializers.ModelSerializer):
     participant_id = serializers.CharField(read_only=True)
     username = serializers.CharField(required=False, allow_blank=True)
     # Real linked teacher account, chosen via the teacher-search autocomplete on the
-    # registration page — restricted to actual teacher accounts, not just any user.
-    teacher = serializers.PrimaryKeyRelatedField(queryset=User.objects.filter(role=User.Role.TEACHER), required=False, allow_null=True)
+    # registration page. This does NOT link the account directly anymore — it just
+    # queues a pending TeacherLinkRequest for the teacher to confirm (see create()
+    # below and TeacherLinkRequestViewSet), so the field stays write-only here.
+    teacher = serializers.PrimaryKeyRelatedField(queryset=User.objects.filter(role=User.Role.TEACHER, teacher_approved=True), required=False, allow_null=True, write_only=True)
 
     class Meta:
         model = User
@@ -325,6 +327,7 @@ class RegisterSerializer(serializers.ModelSerializer):
                   'teacher_name', 'teacher_phone', 'teacher', 'teachers')
 
     def create(self, validated_data):
+        requested_teacher = validated_data.pop('teacher', None)
         if not validated_data.get('username'):
             import uuid
             validated_data['username'] = f"{validated_data.get('phone')}_{uuid.uuid4().hex[:8]}"
@@ -332,13 +335,20 @@ class RegisterSerializer(serializers.ModelSerializer):
         # immediately nag them to "confirm" it again until the next school year.
         if validated_data.get('grade'):
             validated_data['grade_confirmed_year'] = current_academic_year()
-        return User.objects.create_user(**validated_data, role=User.Role.PARTICIPANT)
+        user = User.objects.create_user(**validated_data, role=User.Role.PARTICIPANT)
+        if requested_teacher:
+            from .models import TeacherLinkRequest
+            TeacherLinkRequest.objects.create(teacher=requested_teacher, student=user, initiated_by=TeacherLinkRequest.InitiatedBy.STUDENT)
+        return user
 
 
 class TeacherRegisterSerializer(serializers.ModelSerializer):
     """Public self-registration for teachers — no school/grade/birth_date needed,
     unlike student registration. User.save() fills in a placeholder `school` value
-    for the teacher role when left blank."""
+    for the teacher role when left blank. Self-registered teachers start
+    unapproved (teacher_approved=False) and must be reviewed by an admin before
+    the account can act as a teacher — unlike teachers an admin creates directly
+    via UserViewSet, who are trusted immediately (model default is True there)."""
     password = serializers.CharField(write_only=True)
     participant_id = serializers.CharField(read_only=True)
     username = serializers.CharField(required=False, allow_blank=True)
@@ -351,7 +361,7 @@ class TeacherRegisterSerializer(serializers.ModelSerializer):
         if not validated_data.get('username'):
             import uuid
             validated_data['username'] = f"{validated_data.get('phone')}_{uuid.uuid4().hex[:8]}"
-        return User.objects.create_user(**validated_data, role=User.Role.TEACHER)
+        return User.objects.create_user(**validated_data, role=User.Role.TEACHER, teacher_approved=False)
 
 
 class TeacherCoinAdjustmentSerializer(serializers.ModelSerializer):
@@ -366,6 +376,26 @@ class TeacherCoinAdjustmentSerializer(serializers.ModelSerializer):
         if not obj.created_by_id:
             return None
         return f"{obj.created_by.last_name} {obj.created_by.first_name}".strip()
+
+
+class TeacherLinkRequestSerializer(serializers.ModelSerializer):
+    teacher_name = serializers.SerializerMethodField()
+    teacher_phone = serializers.ReadOnlyField(source='teacher.phone')
+    student_name = serializers.SerializerMethodField()
+    student_phone = serializers.ReadOnlyField(source='student.phone')
+    student_grade = serializers.ReadOnlyField(source='student.grade')
+
+    class Meta:
+        model = TeacherLinkRequest
+        fields = ('id', 'teacher', 'teacher_name', 'teacher_phone', 'student', 'student_name', 'student_phone',
+                  'student_grade', 'status', 'initiated_by', 'created_at', 'responded_at')
+        read_only_fields = ('status', 'initiated_by', 'created_at', 'responded_at')
+
+    def get_teacher_name(self, obj):
+        return f"{obj.teacher.last_name} {obj.teacher.first_name}".strip()
+
+    def get_student_name(self, obj):
+        return f"{obj.student.last_name} {obj.student.first_name}".strip()
 
 
 class LoginRequestSerializer(serializers.Serializer):
