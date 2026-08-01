@@ -686,25 +686,39 @@ class TeacherMyCoinsView(APIView):
 
     def get(self, request):
         from django.db.models import Sum
+        lang = request.query_params.get('lang', 'uz')
         adjustment = TeacherCoinAdjustment.objects.filter(teacher=request.user).aggregate(total=Sum('amount'))['total'] or 0
 
         pairs = set(Registration.objects.filter(teacher=request.user).values_list('user_id', 'olympiad_id'))
         gold = silver = bronze = 0
         students = set()
+        entries = []
 
         if pairs:
             user_ids = {uid for uid, _ in pairs}
-            results = ExamResult.objects.filter(completed_at__isnull=False, score__gte=90, user_id__in=user_ids)
+            results = ExamResult.objects.filter(completed_at__isnull=False, score__gte=90, user_id__in=user_ids).select_related('user', 'olympiad')
             for res in results:
                 if (res.user_id, res.olympiad_id) not in pairs:
                     continue
                 if res.score >= 100:
+                    medal, coins = 'gold', 3
                     gold += 1
                 elif res.score >= 95:
+                    medal, coins = 'silver', 2
                     silver += 1
-                elif res.score >= 90:
+                else:
+                    medal, coins = 'bronze', 1
                     bronze += 1
                 students.add(res.user_id)
+                entries.append({
+                    'student_id': res.user_id,
+                    'student_name': f"{res.user.last_name} {res.user.first_name}".strip(),
+                    'olympiad_id': res.olympiad_id,
+                    'olympiad_title': res.olympiad.get_translated('title', lang) if res.olympiad else '',
+                    'medal': medal,
+                    'coins': coins,
+                })
+        entries.sort(key=lambda x: x['coins'], reverse=True)
 
         return Response({
             'gold': gold,
@@ -713,6 +727,7 @@ class TeacherMyCoinsView(APIView):
             'manual_adjustment': adjustment,
             'total_coins': gold * 3 + silver * 2 + bronze * 1 + adjustment,
             'student_count': len(students),
+            'entries': entries,
         })
 
 
