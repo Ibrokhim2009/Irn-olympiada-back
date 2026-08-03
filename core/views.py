@@ -2371,8 +2371,13 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
         if user.is_staff or user.is_superuser:
-            return SupportTicket.objects.all()
-        return SupportTicket.objects.filter(user=user)
+            qs = SupportTicket.objects.all()
+        else:
+            qs = SupportTicket.objects.filter(user=user)
+        role = self.request.query_params.get('role')
+        if role:
+            qs = qs.filter(user__role=role)
+        return qs
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)

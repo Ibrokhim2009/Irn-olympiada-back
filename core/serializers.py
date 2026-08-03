@@ -594,14 +594,15 @@ class SupportTicketSerializer(serializers.ModelSerializer):
     user_full_name = serializers.SerializerMethodField()
     user_participant_id = serializers.ReadOnlyField(source='user.participant_id')
     user_phone = serializers.ReadOnlyField(source='user.phone')
+    user_role = serializers.ReadOnlyField(source='user.role')
     status_label = serializers.SerializerMethodField()
     message = serializers.CharField(required=False, allow_blank=True)
 
     class Meta:
         model = SupportTicket
         fields = (
-            'id', 'user', 'user_full_name', 'user_participant_id', 'user_phone', 
-            'subject', 'message', 'image', 'status', 'status_label', 
+            'id', 'user', 'user_full_name', 'user_participant_id', 'user_phone', 'user_role',
+            'subject', 'message', 'image', 'status', 'status_label',
             'replies', 'created_at', 'updated_at'
         )
         read_only_fields = ('user', 'status')
