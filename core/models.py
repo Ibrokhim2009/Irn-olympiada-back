@@ -354,6 +354,17 @@ class Registration(models.Model):
             return False
         return timezone.now() > self.payment_deadline
 
+    @property
+    def seconds_left(self):
+        from django.utils import timezone
+        if self.payment_status not in [self.PaymentStatus.PENDING]:
+            return 0
+        diff = self.payment_deadline - timezone.now()
+        return max(0, int(diff.total_seconds()))
+
+    def __str__(self):
+        return f"{self.user.username} - {self.olympiad.title_ru}"
+
 
 class TeacherCoinAdjustment(models.Model):
     """Manual coin credit/debit an admin applies to a teacher, on top of the
@@ -373,17 +384,6 @@ class TeacherCoinAdjustment(models.Model):
 
     def __str__(self):
         return f"{self.teacher} {'+' if self.amount >= 0 else ''}{self.amount}"
-
-    @property
-    def seconds_left(self):
-        from django.utils import timezone
-        if self.payment_status not in [self.PaymentStatus.PENDING]:
-            return 0
-        diff = self.payment_deadline - timezone.now()
-        return max(0, int(diff.total_seconds()))
-
-    def __str__(self):
-        return f"{self.user.username} - {self.olympiad.title_ru}"
 
 
 class TeacherLinkRequest(models.Model):
