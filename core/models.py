@@ -139,6 +139,7 @@ class Olympiad(models.Model):
 
     category = models.CharField(max_length=100, null=True, blank=True, db_index=True,
         verbose_name="Группа/бренд", help_text="Используется для группировки олимпиад на сайте (например: MOCK, XPERTSTEM). Если не указано, берётся первое слово названия.")
+    banner_image = models.ImageField(upload_to='olympiads/banners/', null=True, blank=True, verbose_name="Баннер")
     
     olympiad_type = models.CharField(max_length=10, choices=Type.choices, default=Type.ONLINE, db_index=True)
     price = models.BigIntegerField(default=0, help_text="Цена в UZS (целое число)")
