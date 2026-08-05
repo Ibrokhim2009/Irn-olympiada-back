@@ -373,6 +373,34 @@ class Registration(models.Model):
         return f"{self.user.username} - {self.olympiad.title_ru}"
 
 
+class PaymentReminderSMSSettings(models.Model):
+    """Singleton settings (id=1) for the payment-reminder SMS automation,
+    editable from the admin SMS Manager page. Which olympiads it actually
+    runs for is controlled separately, per-olympiad, via
+    Olympiad.payment_reminder_sms_enabled."""
+    interval_hours = models.PositiveIntegerField(default=6, verbose_name="Интервал повтора (часы)")
+    message_template = models.TextField(
+        default=(
+            "⏳ {olympiad} olimpiadasiga ro'yxatdan o'tish yakunlanishiga atigi {time_left} qoldi! "
+            "Ishtirok etish imkoniyatini qo'ldan boy bermang — hoziroq ro'yxatdan o'ting! 🏆"
+        ),
+        verbose_name="Текст SMS",
+        help_text="Доступны переменные {olympiad} и {time_left}.",
+    )
+
+    class Meta:
+        verbose_name = "Настройки авто-напоминаний об оплате"
+        verbose_name_plural = "Настройки авто-напоминаний об оплате"
+
+    def __str__(self):
+        return "Payment reminder SMS settings"
+
+    @classmethod
+    def get_solo(cls):
+        obj, _ = cls.objects.get_or_create(id=1)
+        return obj
+
+
 class TeacherCoinAdjustment(models.Model):
     """Manual coin credit/debit an admin applies to a teacher, on top of the
     coins auto-computed from medal results (score>=100/95/90). Positive amount

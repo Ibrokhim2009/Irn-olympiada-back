@@ -31,7 +31,8 @@ from .serializers import (
     SupportTicketSerializer, TicketReplySerializer, EditRequestSerializer,
     BookSerializer, BookOrderSerializer,
     VisaApplicantListSerializer, VisaApplicantDetailSerializer,
-    VisaDocumentSerializer, VisaNoteSerializer, VisaTaskSerializer, VisaAuditLogSerializer
+    VisaDocumentSerializer, VisaNoteSerializer, VisaTaskSerializer, VisaAuditLogSerializer,
+    PaymentReminderSMSSettingsSerializer
 )
 from .models import (
     User, Olympiad, SubOlympiad, SubOlympiadGrade,
@@ -39,7 +40,7 @@ from .models import (
     Notification, Region, SupportTicket, TicketReply,
     SMSSentHistory, ClickTransactions, EditRequest, Book, BookOrder,
     VisaApplicant, VisaDocument, VisaNote, VisaTask, VisaAuditLog,
-    TeacherCoinAdjustment, TeacherLinkRequest
+    TeacherCoinAdjustment, TeacherLinkRequest, PaymentReminderSMSSettings
 )
 from .permissions import IsAdminUserOrReadOnly, IsAdminOrCoordinatorReadOnly, IsAdminOrCoordinator, IsTeacher, IsApprovedTeacher
 from .utils_payme import get_payme_link
@@ -2576,6 +2577,24 @@ class SMSBalanceView(APIView):
         if result.get('status') == 'error':
             return Response({'error': result.get('message')}, status=503)
         return Response({'balance': result['balance']})
+
+
+class PaymentReminderSMSSettingsView(APIView):
+    """Interval + message text for the payment-reminder SMS automation
+    (send_payment_reminder_sms management command). Per-olympiad on/off is
+    a separate field, Olympiad.payment_reminder_sms_enabled."""
+    permission_classes = (permissions.IsAdminUser,)
+
+    def get(self, request):
+        settings_obj = PaymentReminderSMSSettings.get_solo()
+        return Response(PaymentReminderSMSSettingsSerializer(settings_obj).data)
+
+    def patch(self, request):
+        settings_obj = PaymentReminderSMSSettings.get_solo()
+        serializer = PaymentReminderSMSSettingsSerializer(settings_obj, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
 
 
 class TelegramWebhookView(APIView):

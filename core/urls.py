@@ -18,7 +18,7 @@ from .views import (
     NotificationViewSet, SeedNotificationsView, SendNotificationView,
     AdminStatsView, RegionViewSet, ExamResultViewSet,
     SupportTicketViewSet, TicketReplyViewSet,
-    SMSTemplateView, SMSSendView, SMSBalanceView, SMSSentHistoryView,
+    SMSTemplateView, SMSSendView, SMSBalanceView, SMSSentHistoryView, PaymentReminderSMSSettingsView,
     TelegramWebhookView, EditRequestViewSet, BookViewSet,
     TelegramUsersListView, TelegramBroadcastView, BookOrderViewSet,
     VisaApplicantViewSet, VisaDocumentViewSet, VisaNoteViewSet, VisaTaskViewSet, VisaAuditLogViewSet,
@@ -117,6 +117,7 @@ urlpatterns = [
     path('sms/send/', SMSSendView.as_view(), name='sms-send'),
     path('sms/balance/', SMSBalanceView.as_view(), name='sms-balance'),
     path('sms/sent-history/', SMSSentHistoryView.as_view(), name='sms-sent-history'),
+    path('sms/reminder-settings/', PaymentReminderSMSSettingsView.as_view(), name='sms-reminder-settings'),
 
     # Telegram Bot Webhook
     path('telegram-webhook/<str:bot_type>/', TelegramWebhookView.as_view(), name='telegram-webhook'),

@@ -5,7 +5,7 @@ from .models import (
     Notification, Region, UserAchievement,
     SupportTicket, TicketReply, EditRequest, Book, BookOrder,
     VisaApplicant, VisaDocument, VisaNote, VisaTask, VisaAuditLog,
-    TeacherCoinAdjustment, TeacherLinkRequest
+    TeacherCoinAdjustment, TeacherLinkRequest, PaymentReminderSMSSettings
 )
 import base64
 import uuid
@@ -870,3 +870,9 @@ class VisaApplicantDetailSerializer(VisaApplicantListSerializer):
             pn = data['passport_number']
             data['passport_number'] = (pn[:2] + '*' * (len(pn) - 4) + pn[-2:]) if len(pn) > 4 else '*' * len(pn)
         return data
+
+
+class PaymentReminderSMSSettingsSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PaymentReminderSMSSettings
+        fields = ('interval_hours', 'message_template')
