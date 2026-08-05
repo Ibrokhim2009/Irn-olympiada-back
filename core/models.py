@@ -151,6 +151,8 @@ class Olympiad(models.Model):
     registration_end_date = models.DateTimeField(null=True, blank=True, verbose_name="Дата окончания регистрации")
     max_participants = models.PositiveIntegerField(null=True, blank=True, default=0, verbose_name="Макс. количество участников (0 - без лимита)")
     is_active = models.BooleanField(default=True)
+    payment_reminder_sms_enabled = models.BooleanField(default=False, verbose_name="Авто-SMS напоминание о неоплаченной регистрации",
+        help_text="Каждые 6 часов отправляет SMS пользователям, начавшим регистрацию, но не оплатившим её, пока регистрация на олимпиаду ещё открыта.")
     
     class Status(models.TextChoices):
         UPCOMING = 'upcoming', 'Предстоит'
@@ -310,6 +312,7 @@ class Registration(models.Model):
     unique_participant_id = models.CharField(max_length=50, null=True, blank=True, unique=True, db_index=True, verbose_name="Уникальный ID участника для этой олимпиады")
 
     last_called_at = models.DateTimeField(null=True, blank=True, verbose_name="Последний звонок")
+    last_payment_reminder_sent_at = models.DateTimeField(null=True, blank=True, verbose_name="Последнее SMS-напоминание об оплате")
 
     class Meta:
         verbose_name = "Регистрация"

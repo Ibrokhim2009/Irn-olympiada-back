@@ -19,6 +19,30 @@ from core.models import User
 BOT_TOKEN = "7361972097:AAFOiy-yKvejKL_nG4r9b7ecmj6TzJC655A"
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/"
 
+# Channel -> groups auto-repost.
+# Two independent detection paths are supported (see handle_channel_post vs.
+# handle_possible_discussion_repost below) so this works WITHOUT making the
+# bot a channel admin:
+#   Path A: bot is an admin of the channel -> gets channel_post updates directly.
+#   Path B (no channel-admin needed): the channel has a linked Discussion
+#   group (Channel settings -> Discussion), and the bot is just a normal
+#   MEMBER of that group. New channel posts auto-forward into the group as a
+#   message from the channel's own identity, which the bot can read like any
+#   other group message.
+# Either way, the bot still needs to be a MEMBER of every target group below
+# to be allowed to post there. Double-check SOURCE_CHANNEL_USERNAME matches
+# your actual channel — this is the public channel linked as
+# "https://t.me/IRN_Olympiads" elsewhere in the app (SupportPage.jsx, ExamPage.jsx).
+SOURCE_CHANNEL_USERNAME = "@IRN_Olympiads"
+TARGET_GROUP_USERNAMES = [
+    "@Olympiads_Tashkent",
+    "@Khorezm_Karakalpakstan",
+    "@IRN_Surkhandarya_Kashkadarya",
+    "@IRNJizzakh_Samarkand",
+    "@IRN_Navoi_Bukhara",
+    "@Vodiy_IRN",
+]
+
 # Regional groups text
 CHANNELS_TEXT = (
     "Hurmatli ishtirokchilar!\n\n"
@@ -48,6 +72,47 @@ def send_message(chat_id, text, reply_markup=None):
     except Exception as e:
         print(f"Error sending message to {chat_id}:", e)
         return None
+
+def repost_to_groups(from_chat_id, message_id):
+    """Copy a message into every configured target group.
+
+    Uses copyMessage (not forwardMessage) so it lands in each group as a
+    plain native post instead of showing a "Forwarded from" label.
+    """
+    for group in TARGET_GROUP_USERNAMES:
+        try:
+            res = requests.post(API_URL + "copyMessage", json={
+                "chat_id": group,
+                "from_chat_id": from_chat_id,
+                "message_id": message_id,
+            })
+            if res.status_code != 200:
+                print(f"Failed to repost to {group}: {res.text}")
+        except Exception as e:
+            print(f"Error reposting to {group}:", e)
+        time.sleep(0.1)  # rate limit protection
+
+def handle_channel_post(channel_post):
+    """Path A: bot is an admin of the channel and gets channel_post updates directly."""
+    source_chat = channel_post.get("chat", {})
+    source_username = source_chat.get("username")
+    if not source_username or f"@{source_username}" != SOURCE_CHANNEL_USERNAME:
+        return
+    repost_to_groups(source_chat["id"], channel_post["message_id"])
+
+def handle_possible_discussion_repost(message):
+    """Path B: bot is only a member of the channel's linked discussion group.
+    New channel posts auto-forward into that group as a message whose
+    sender_chat is the channel itself — no channel-admin rights needed.
+    """
+    sender_chat = message.get("sender_chat")
+    if not sender_chat:
+        return False
+    sender_username = sender_chat.get("username")
+    if not sender_username or f"@{sender_username}" != SOURCE_CHANNEL_USERNAME:
+        return False
+    repost_to_groups(message["chat"]["id"], message["message_id"])
+    return True
 
 def delete_message(chat_id, message_id):
     """Delete a message by chat_id and message_id silently."""
@@ -207,7 +272,11 @@ def main():
     offset = 0
     while True:
         try:
-            res = requests.get(API_URL + "getUpdates", params={"offset": offset, "timeout": 30})
+            res = requests.get(API_URL + "getUpdates", params={
+                "offset": offset,
+                "timeout": 30,
+                "allowed_updates": '["message", "channel_post"]',
+            })
             if res.status_code != 200:
                 print("Error from Telegram API status:", res.status_code)
                 time.sleep(5)
@@ -220,8 +289,16 @@ def main():
                 # A bug in handling one update should never stop the rest of the
                 # batch from being processed (or take down the whole bot).
                 try:
+                    channel_post = update.get("channel_post")
+                    if channel_post:
+                        handle_channel_post(channel_post)
+                        continue
+
                     message = update.get("message")
                     if not message:
+                        continue
+
+                    if handle_possible_discussion_repost(message):
                         continue
 
                     chat_id = message["chat"]["id"]
