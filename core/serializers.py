@@ -424,8 +424,16 @@ class OlympiadSerializer(serializers.ModelSerializer):
                   'payment_reminder_sms_enabled',
                   'title_ru', 'title_uz', 'title_en', 'description_ru', 'description_uz', 'description_en')
 
+    def _active_registrations(self, obj):
+        # When the view prefetches this via Prefetch(..., to_attr='active_registrations'),
+        # reuse it instead of re-querying per olympiad (was a 2-3x N+1 query source on lists).
+        cached = getattr(obj, 'active_registrations', None)
+        if cached is not None:
+            return cached
+        return list(obj.registrations.exclude(payment_status='expired'))
+
     def get_registered_count(self, obj):
-        return obj.registrations.exclude(payment_status='expired').count()
+        return len(self._active_registrations(obj))
 
     def to_representation(self, instance):
         request = self.context.get('request')
@@ -439,7 +447,7 @@ class OlympiadSerializer(serializers.ModelSerializer):
         try:
             if not obj.max_participants:
                 return 9999
-            reg_count = obj.registrations.exclude(payment_status='expired').count()
+            reg_count = len(self._active_registrations(obj))
             return max(0, obj.max_participants - reg_count)
         except:
             return 0
@@ -448,7 +456,7 @@ class OlympiadSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         try:
             if request and request.user.is_authenticated:
-                return obj.registrations.filter(user=request.user).exclude(payment_status='expired').exists()
+                return any(r.user_id == request.user.id for r in self._active_registrations(obj))
         except:
             pass
         return False

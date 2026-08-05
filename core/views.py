@@ -988,26 +988,38 @@ class OlympiadViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
+
+        base = Olympiad.objects.select_related('test').prefetch_related(
+            'test__questions',
+            'subs__grade_sessions__test',
+            'subs__grade_sessions__test__questions',
+            models.Prefetch(
+                'registrations',
+                queryset=Registration.objects.exclude(payment_status='expired'),
+                to_attr='active_registrations',
+            ),
+        )
+
         if not user.is_authenticated:
-            return Olympiad.objects.filter(is_active=True)
+            return base.filter(is_active=True)
 
         if user.role in ['admin', 'superadmin']:
-            return Olympiad.objects.all()
+            return base
 
         # For participants:
         # 1. Shows olympiads they are registered for
         # 2. Shows active olympiads that match their grade
         reg_filter = models.Q(registrations__user=user)
-        
+
         grade_filter = models.Q(is_active=True)
         if user.grade:
             user_grade = str(user.grade).strip()
             grade_filter &= (
-                models.Q(grades=[]) | 
+                models.Q(grades=[]) |
                 models.Q(subs__grade_sessions__grade__iexact=user_grade)
             )
-        
-        return Olympiad.objects.filter(reg_filter | grade_filter).distinct()
+
+        return base.filter(reg_filter | grade_filter).distinct()
 
 
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAdminUser])
